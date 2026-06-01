@@ -4,11 +4,7 @@
 
 ```powershell
 cd school-erp-backend
-
-# Start dependencies
-docker-compose up -d
-
-# Run server
+docker-compose up -d            # Start PostgreSQL, Redis, MinIO
 .venv\Scripts\uvicorn app.main:app --reload
 ```
 
