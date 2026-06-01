@@ -13,8 +13,10 @@ python -m venv .venv
 ```powershell
 cd school-erp-backend
 docker-compose up -d            # Start PostgreSQL, Redis, MinIO
-.venv\Scripts\uvicorn app.main:app --reload
+.venv\Scripts\uvicorn app.main:app --reload --port 8001
 ```
+
+> **Note:** Backend must run on port **8001** (frontend proxy is configured to forward `/api` to `localhost:8001`).
 
 ## Frontend (React + Vite)
 
