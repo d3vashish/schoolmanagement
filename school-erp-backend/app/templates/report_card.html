@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: sans-serif; font-size: 12px; }
+  h1 { text-align: center; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #333; padding: 4px 8px; text-align: left; }
+  th { background: #eee; }
+  .footer { margin-top: 20px; }
+</style>
+</head>
+<body>
+  <h1>Report Card</h1>
+  <p><strong>Student:</strong> {{ student_name }}</p>
+  <p><strong>Admission No:</strong> {{ admission_number }}</p>
+  <p><strong>Class:</strong> {{ class_name }}</p>
+  <p><strong>Exam:</strong> {{ exam_name }}</p>
+
+  <table>
+    <thead>
+      <tr><th>Subject</th><th>Marks</th><th>Max Marks</th><th>Percentage</th><th>Grade</th></tr>
+    </thead>
+    <tbody>
+      {% for row in results %}
+      <tr>
+        <td>{{ row.subject_name }}</td>
+        <td>{% if row.is_absent %}AB{% else %}{{ row.marks }}{% endif %}</td>
+        <td>{{ row.max_marks }}</td>
+        <td>{% if not row.is_absent %}{{ "%.2f"|format(row.percentage) }}{% else %}-{% endif %}</td>
+        <td>{{ row.grade or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if aggregate %}
+  <div class="footer">
+    <p><strong>Total:</strong> {{ aggregate.total_marks }} / {{ aggregate.max_total }}</p>
+    <p><strong>Percentage:</strong> {{ "%.2f"|format(aggregate.percentage) }}%</p>
+    <p><strong>Grade:</strong> {{ aggregate.grade or '-' }}</p>
+    <p><strong>Rank:</strong> {{ aggregate.rank or '-' }}</p>
+  </div>
+  {% endif %}
+</body>
+</html>

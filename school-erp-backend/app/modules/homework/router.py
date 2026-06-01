@@ -1,0 +1,93 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_db
+from app.core.deps import QueryScoper, get_current_user, role_required
+from app.modules.homework.models import HomeworkAssignment
+from app.modules.homework.schemas import HomeworkCreate, HomeworkResponse, HomeworkUpdate
+
+admin_teacher = [role_required("super_admin", "principal", "teacher")]
+
+router = APIRouter(prefix="/homework", tags=["homework"])
+
+
+@router.get("", response_model=list[HomeworkResponse])
+async def list_homework(
+    student_group: str | None = None,
+    course: str | None = None,
+    assigned_by: str | None = None,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    q = select(HomeworkAssignment).order_by(HomeworkAssignment.assigned_date.desc())
+
+    scope = QueryScoper.for_homework(db, current_user)
+    if scope is not None:
+        q = q.where(scope)
+
+    if student_group:
+        q = q.where(HomeworkAssignment.student_group == student_group)
+    if course:
+        q = q.where(HomeworkAssignment.course == course)
+    if assigned_by:
+        q = q.where(HomeworkAssignment.assigned_by == assigned_by)
+    if status:
+        q = q.where(HomeworkAssignment.status == status)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@router.get("/{homework_id}", response_model=HomeworkResponse)
+async def get_homework(
+    homework_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    hw = await db.get(HomeworkAssignment, homework_id)
+    if not hw:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Homework not found")
+
+    scope = QueryScoper.for_homework(db, current_user)
+    if scope is not None:
+        check = await db.execute(
+            select(HomeworkAssignment).where(HomeworkAssignment.id == homework_id).where(scope)
+        )
+        if not check.first():
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    return hw
+
+
+@router.post("", response_model=HomeworkResponse, dependencies=admin_teacher)
+async def create_homework(
+    body: HomeworkCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    data = body.model_dump(exclude_none=True)
+    data["assigned_by"] = current_user["id"]
+    hw = HomeworkAssignment(**data)
+    db.add(hw)
+    await db.flush()
+    return hw
+
+
+@router.patch("/{homework_id}", response_model=HomeworkResponse, dependencies=admin_teacher)
+async def update_homework(homework_id: str, body: HomeworkUpdate, db: AsyncSession = Depends(get_db)):
+    hw = await db.get(HomeworkAssignment, homework_id)
+    if not hw:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Homework not found")
+    for field, value in body.model_dump(exclude_none=True).items():
+        setattr(hw, field, value)
+    await db.flush()
+    return hw
+
+
+@router.delete("/{homework_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=admin_teacher)
+async def delete_homework(homework_id: str, db: AsyncSession = Depends(get_db)):
+    hw = await db.get(HomeworkAssignment, homework_id)
+    if not hw:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Homework not found")
+    await db.delete(hw)
