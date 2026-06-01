@@ -1,0 +1,30 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "terminator": {
+      "type": "local",
+      "command": ["npx", "-y", "terminator-mcp-agent@latest"],
+      "enabled": true
+    },
+    "browsermcp": {
+      "type": "local",
+      "command": ["npx", "-y", "@browsermcp/mcp@latest"],
+      "enabled": true
+    },
+    "browserbase": {
+      "type": "local",
+      "command": ["npx", "@browserbasehq/mcp"],
+      "enabled": true,
+      "env": {
+        "BROWSERBASE_API_KEY": "bb_live_CaVW8th2e4_KIyNnmfmvnn9qJAw",
+        "BROWSERBASE_PROJECT_ID": "889aa416-dd70-44e5-8ca1-d8c29b08954d",
+        "GEMINI_API_KEY": "AIzaSyBGvh0ENLfptdNQnmV_i0nXcafWahi-Npg"
+      }
+    },
+    "stitch": {
+      "type": "local",
+      "command": ["npx", "@_davideast/stitch-mcp", "proxy"],
+      "enabled": true
+    }
+  }
+}

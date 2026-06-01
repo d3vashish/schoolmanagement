@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "erpnext": {
+      "command": "node",
+      "args": ["C:/Users/nsonk/erpnext-mcp-server/build/index.js"],
+      "env": {
+        "ERPNEXT_URL": "http://16.176.144.18:8000",
+        "ERPNEXT_API_KEY": "80bfeffdd0c15a4",
+        "ERPNEXT_API_SECRET": "9f188d2f103bf79"
+      }
+    },
+    "terminator": {
+      "command": "npx.cmd",
+      "args": ["-y", "terminator-mcp-agent@latest"]
+    },
+    "browserbase": {
+      "command": "npx.cmd",
+      "args": ["@browserbasehq/mcp"],
+      "env": {
+        "BROWSERBASE_API_KEY": "bb_live_CaVW8th2e4_KIyNnmfmvnn9qJAw",
+        "BROWSERBASE_PROJECT_ID": "889aa416-dd70-44e5-8ca1-d8c29b08954d",
+        "GEMINI_API_KEY": "AIzaSyBGvh0ENLfptdNQnmV_i0nXcafWahi-Npg"
+      }
+    }
+  }
+}
