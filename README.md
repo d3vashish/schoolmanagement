@@ -2,6 +2,14 @@
 
 ## Backend (FastAPI)
 
+### First time setup (create virtual environment)
+```powershell
+cd school-erp-backend
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
+### Run server
 ```powershell
 cd school-erp-backend
 docker-compose up -d            # Start PostgreSQL, Redis, MinIO
