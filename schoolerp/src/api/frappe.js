@@ -35,7 +35,7 @@ export function getAccessToken() { return accessToken; }
 loadTokens();
 
 // ─── Axios Client ─────────────────────────────────────────────────────────────
-const client = axios.create({
+export const client = axios.create({
   baseURL: BASE,
   timeout: 30000,
   headers: { 'Content-Type': 'application/json' },
@@ -1193,15 +1193,13 @@ export async function deleteDoc(doctype, name) {
   if (h.delete) return h.delete(name);
 }
 
-// ─── Admin API (stubs that try normal API first) ─────────────────────────────
+// ─── Old Admin stubs (still used by Attendance, Timetable) ────────────────────
 export async function adminGetList(doctype, filters, fields, pageLength, pageStart) {
   return getList(doctype, filters, fields, pageLength, pageStart);
 }
 
 export async function adminCallMethod(method, args = {}) {
-  if (method === 'frappe.client.get') {
-    return getDoc(args.doctype || args.name, args.name);
-  }
+  if (method === 'frappe.client.get') return getDoc(args.doctype || args.name, args.name);
   return { message: 'ok' };
 }
 
@@ -1211,6 +1209,57 @@ export async function adminCreateDoc(doctype, data) {
 
 export async function adminUpdateDoc(doctype, name, data) {
   return updateDoc(doctype, name, data);
+}
+
+// ─── New Admin API ────────────────────────────────────────────────────────────
+export async function adminListUsers(params = {}) {
+  const res = await client.get('/admin/users', { params });
+  return res.data;
+}
+
+export async function adminCreateUser(data) {
+  const res = await client.post('/admin/users', data);
+  return res.data;
+}
+
+export async function adminGetUser(userId) {
+  const res = await client.get(`/admin/users/${userId}`);
+  return res.data;
+}
+
+export async function adminUpdateUser(userId, data) {
+  const res = await client.put(`/admin/users/${userId}`, data);
+  return res.data;
+}
+
+export async function adminToggleUserStatus(userId) {
+  const res = await client.patch(`/admin/users/${userId}/status`);
+  return res.data;
+}
+
+export async function adminResetPassword(userId, newPassword) {
+  const res = await client.post(`/admin/users/${userId}/reset-password`, { new_password: newPassword });
+  return res.data;
+}
+
+export async function adminGetSettings() {
+  const res = await client.get('/admin/settings');
+  return res.data;
+}
+
+export async function adminUpdateSettings(settings) {
+  const res = await client.put('/admin/settings', settings);
+  return res.data;
+}
+
+export async function adminGetAuditLog(params = {}) {
+  const res = await client.get('/admin/audit/log', { params });
+  return res.data;
+}
+
+export async function adminGetDashboard() {
+  const res = await client.get('/admin/dashboard');
+  return res.data;
 }
 
 // ─── Strict variants (same as regular) ───────────────────────────────────────

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, getDoc, createDoc, updateDoc, deleteDoc } from '../api/frappe';
+import { getList, getDoc, createDoc, updateDoc, deleteDoc, client } from '../api/frappe';
 import { isAdmin, isTeacher, canManageStudents, canDeleteStudent, canManageStandards, canManageSections } from '../utils/roles';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -107,9 +107,8 @@ export default function Students() {
       });
       if (search) params.set('search', search);
 
-      const res = await fetch(`/api/academic/students?${params}`);
-      if (!res.ok) throw new Error('Failed to load students');
-      return res.json();
+      const res = await client.get(`/academic/students?${params}`);
+      return res.data;
     },
     enabled: !!selectedSection,
   });

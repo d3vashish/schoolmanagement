@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useDebounce } from '../hooks/useDebounce';
 import { isLibrarian, isAccountant } from '../utils/roles';
 import { useAuth } from '../context/AuthContext';
+import { client } from '../api/frappe';
 
 export default function StudentLookup() {
   const [query, setQuery] = useState('');
@@ -16,9 +17,8 @@ export default function StudentLookup() {
     queryKey: ['student-lookup', debouncedQuery],
     queryFn: async () => {
       if (!debouncedQuery || debouncedQuery.length < 2) return [];
-      const res = await fetch(`/api/academic/students/search?q=${encodeURIComponent(debouncedQuery)}`);
-      if (!res.ok) throw new Error('Search failed');
-      return res.json();
+      const res = await client.get(`/academic/students/search?q=${encodeURIComponent(debouncedQuery)}`);
+      return res.data;
     },
     enabled: debouncedQuery.length >= 2,
   });
@@ -26,9 +26,8 @@ export default function StudentLookup() {
   const { data: financial } = useQuery({
     queryKey: ['student-financial', selected?.id],
     queryFn: async () => {
-      const res = await fetch(`/api/academic/students/${selected.id}/financial`);
-      if (!res.ok) throw new Error('Failed to load financial data');
-      return res.json();
+      const res = await client.get(`/academic/students/${selected.id}/financial`);
+      return res.data;
     },
     enabled: !!selected && isAccountant(user),
   });
