@@ -41,6 +41,7 @@ from app.modules.academic.schemas import (
     SectionResponse,
     StudentCreate,
     StudentProfileResponse,
+    StudentFinancialResponse,
     StudentSearchResponse,
     StudentUpdate,
     SubjectCreate,
@@ -562,6 +563,60 @@ async def search_students(
         )
         for r in rows
     ]
+
+
+@router.get("/students/{student_id}/financial", response_model=StudentFinancialResponse)
+async def get_student_financial(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    role = current_user["role"]
+    if role not in ("super_admin", "principal", "accountant"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    result = await db.execute(
+        select(
+            StudentProfile.id, StudentProfile.first_name, StudentProfile.last_name,
+            StudentProfile.admission_number,
+            AcademicClass.name.label("student_group_name"),
+        ).outerjoin(AcademicClass, StudentProfile.class_id == AcademicClass.id)
+        .where(StudentProfile.id == student_id)
+    )
+    row = result.one_or_none()
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    from app.modules.fees.models import Invoice
+
+    fees_result = await db.execute(
+        select(
+            sa_func.coalesce(sa_func.sum(Invoice.net_amount), 0).label("total_fees"),
+            sa_func.coalesce(sa_func.sum(
+                sa_func.case((Invoice.status == "PAID", Invoice.net_amount), else_=0)
+            ), 0).label("paid_amount"),
+            sa_func.max(Invoice.paid_at).label("last_payment_date"),
+        ).where(Invoice.student_id == student_id)
+    )
+    fees_row = fees_result.one()
+    total_fees = float(fees_row.total_fees)
+    paid_amount = float(fees_row.paid_amount)
+    due_amount = max(0, total_fees - paid_amount)
+    payment_status = (
+        "paid" if total_fees > 0 and due_amount == 0
+        else "partial" if paid_amount > 0
+        else "unpaid" if total_fees > 0
+        else "no_fees"
+    )
+
+    return StudentFinancialResponse(
+        id=row.id, first_name=row.first_name, last_name=row.last_name,
+        admission_number=row.admission_number,
+        student_group_name=row.student_group_name,
+        total_fees=total_fees, paid_amount=paid_amount, due_amount=due_amount,
+        last_payment_date=fees_row.last_payment_date,
+        payment_status=payment_status,
+    )
 
 
 # ── Instructor Single CRUD ────────────────────────────────────────────────

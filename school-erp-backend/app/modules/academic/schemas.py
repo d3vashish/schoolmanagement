@@ -145,6 +145,19 @@ class StudentSearchResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StudentFinancialResponse(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    admission_number: str
+    student_group_name: str | None = None
+    total_fees: float = 0
+    paid_amount: float = 0
+    due_amount: float = 0
+    last_payment_date: datetime | None = None
+    payment_status: str = "unknown"
+
+
 class InstructorResponse(BaseModel):
     id: UUID
     user_id: UUID
