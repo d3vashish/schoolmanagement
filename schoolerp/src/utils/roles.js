@@ -45,3 +45,7 @@ export function canManageStandards(user) {
 export function canManageSections(user) {
   return isSuperAdmin(user);
 }
+
+export function canManageSubjects(user) {
+  return isSuperAdmin(user) || isPrincipal(user);
+}
