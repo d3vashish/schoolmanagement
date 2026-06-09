@@ -487,15 +487,26 @@ async def update_student(student_id: str, body: StudentUpdate, db: AsyncSession 
     return await get_student(student_id, db)
 
 
-@router.delete("/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[admin_only])
-async def delete_student(student_id: str, db: AsyncSession = Depends(get_db)):
+@router.delete("/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
+async def delete_student(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    role = current_user["role"]
+    if role not in ("super_admin", "principal"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
     profile = await db.get(StudentProfile, student_id)
     if not profile:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
     user = await db.get(User, profile.user_id)
-    if user:
+    if role == "super_admin" and user:
         user.deleted_at = datetime.now(timezone.utc)
         user.is_active = False
+    elif role == "principal" and user:
+        user.is_active = False  # soft-delete only
     await db.flush()
 
 
