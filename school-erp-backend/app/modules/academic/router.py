@@ -272,6 +272,10 @@ async def list_students(
     ).join(User, StudentProfile.user_id == User.id).outerjoin(AcademicClass, StudentProfile.class_id == AcademicClass.id)
 
     if section_id:
+        try:
+            UUID(section_id)
+        except ValueError:
+            return PaginatedStudentResponse(data=[], total=0, page=page, per_page=per_page, total_pages=0)
         query = query.where(StudentProfile.section_id == section_id)
 
     if search:
@@ -925,6 +929,10 @@ async def list_teacher_assignments(
     if instructor_id:
         query = query.where(TeacherAssignment.instructor_id == instructor_id)
     if section_id:
+        try:
+            UUID(section_id)
+        except ValueError:
+            return []
         query = query.where(TeacherAssignment.section_id == section_id)
     if subject_id:
         query = query.where(TeacherAssignment.subject_id == subject_id)

@@ -98,7 +98,7 @@ export default function Students() {
   const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
     queryKey: ['Student', 'students', selectedSection?.name, studentPage, search],
     queryFn: async () => {
-      if (!selectedSection) return { data: [], total: 0, total_pages: 1 };
+      if (!selectedSection?.name) return { data: [], total: 0, total_pages: 1 };
 
       const params = new URLSearchParams({
         section_id: selectedSection.name,
@@ -110,7 +110,7 @@ export default function Students() {
       const res = await client.get(`/academic/students?${params}`);
       return res.data;
     },
-    enabled: !!selectedSection,
+    enabled: !!selectedSection?.name,
   });
 
   const students = studentsData?.data || [];

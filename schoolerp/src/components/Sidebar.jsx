@@ -68,7 +68,9 @@ const navGroups = [
     { path: '/store',      label: 'Store & POS',   icon: 'store'     },
   ]},
   { label: 'Admin', iconColor: '#FBBF24', items: [
-    { path: '/users', label: 'Users', icon: 'users' },
+    { path: '/admin',    label: 'Dashboard',  icon: 'dashboard' },
+    { path: '/users',    label: 'Users',      icon: 'users' },
+    { path: '/audit-log', label: 'Audit Log', icon: 'reports' },
   ]},
 ];
 

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { useSettings } from '../context/SettingsContext';
-import { useFrappeDoc, useFrappeUpdate } from '../hooks/useFrappeQuery';
+import { adminGetSettings, adminUpdateSettings } from '../api/frappe';
 
-const Section = ({ title, children, index = 0, className = '' }) => (
+const SECTION = ({ title, children, index = 0, className = '' }) => (
   <div
     className={`p-[1.5px] rounded-[32px] bg-black/[0.02] border border-[var(--color-border-light)] animate-in h-full ${className}`}
     style={{ animationDelay: `${150 + index * 100}ms` }}
@@ -59,61 +58,41 @@ const SelectField = ({ id, name, value, onChange, options }) => (
   </div>
 );
 
+const DEFAULT_FORM = {
+  language: 'en',
+  time_zone: 'Asia/Kolkata',
+  date_format: 'dd-mm-yyyy',
+  currency: 'INR',
+  school_name: '',
+  school_abbreviation: '',
+  school_email: '',
+  school_phone: '',
+  school_address: '',
+  academic_year: '',
+  academic_term: '',
+  max_students_per_section: '40',
+};
+
 export default function GeneralSettings() {
-  const settingsCtx = useSettings();
+  const [form, setForm] = useState(DEFAULT_FORM);
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
-
-  const [form, setForm] = useState({
-    language: 'en',
-    time_zone: 'Asia/Kolkata',
-    date_format: 'dd-mm-yyyy',
-    currency: 'INR',
-    school_name: '',
-    school_abbreviation: '',
-    school_email: '',
-    school_phone: '',
-    school_address: '',
-    academic_year: '',
-    academic_term: '',
-    max_students_per_section: '40',
-  });
-
-  const { data: sysSettings, isLoading: loadingSys } = useFrappeDoc('System Settings', 'System Settings');
-  const { data: eduSettings, isLoading: loadingEdu } = useFrappeDoc('Education Settings', 'Education Settings');
-
-  const loading = loadingSys || loadingEdu;
-
-  // Populate form when data loads
-  useEffect(() => {
-    if (sysSettings) {
-      setForm(prev => ({
-        ...prev,
-        language: sysSettings.language || 'en',
-        time_zone: sysSettings.time_zone || 'Asia/Kolkata',
-        date_format: sysSettings.date_format || 'dd-mm-yyyy',
-        currency: sysSettings.currency || 'INR',
-      }));
-    }
-  }, [sysSettings]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (eduSettings) {
-      setForm(prev => ({
-        ...prev,
-        school_name: eduSettings.school_name || '',
-        school_abbreviation: eduSettings.school_abbreviation || '',
-        school_email: eduSettings.school_email || '',
-        school_phone: eduSettings.school_phone || '',
-        school_address: eduSettings.school_address || '',
-        academic_year: eduSettings.academic_year || '',
-        academic_term: eduSettings.academic_term || '',
-        max_students_per_section: eduSettings.max_students_per_section || '40',
-      }));
-    }
-  }, [eduSettings]);
+    adminGetSettings()
+      .then(settings => {
+        if (settings && Array.isArray(settings)) {
+          const map = {};
+          settings.forEach(s => { map[s.key] = s.value; });
+          setForm(prev => ({ ...prev, ...map }));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
 
-  // Warn before leaving with unsaved changes
   useEffect(() => {
     if (!dirty) return;
     const handler = (e) => { e.preventDefault(); e.returnValue = ''; };
@@ -121,50 +100,26 @@ export default function GeneralSettings() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [dirty]);
 
-  const updateSys = useFrappeUpdate('System Settings');
-  const updateEdu = useFrappeUpdate('Education Settings');
-
-  const saving = updateSys.isPending || updateEdu.isPending;
-
   const handleChange = (e) => {
     const { name, value } = e.target;
     setDirty(true);
     setForm(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleSave = (e) => {
+  const handleSave = async (e) => {
     e.preventDefault();
-
-    updateSys.mutate({
-      name: 'System Settings',
-      data: {
-        language: form.language,
-        time_zone: form.time_zone,
-        date_format: form.date_format,
-        currency: form.currency,
-      },
-    });
-
-    updateEdu.mutate({
-      name: 'Education Settings',
-      data: {
-        school_name: form.school_name,
-        school_abbreviation: form.school_abbreviation,
-        school_email: form.school_email,
-        school_phone: form.school_phone,
-        school_address: form.school_address,
-        academic_year: form.academic_year,
-        academic_term: form.academic_term,
-        max_students_per_section: form.max_students_per_section,
-      },
-    }, {
-      onSuccess: () => {
-        if (settingsCtx?.reload) settingsCtx.reload();
-        setDirty(false);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
-      },
-    });
+    setSaving(true);
+    try {
+      const settings = Object.entries(form).map(([key, value]) => ({ key, value }));
+      await adminUpdateSettings(settings);
+      setDirty(false);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {
@@ -239,79 +194,80 @@ export default function GeneralSettings() {
 
       {/* Form */}
       <form onSubmit={handleSave} className="contents">
-          <Section title="School Information" index={0} className="md:col-span-2">
-            <Field label="School Name" hint="Displayed across all modules" id="school_name">
-              <input id="school_name" name="school_name" value={form.school_name} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. DPS Nagpur" />
-            </Field>
-            <Field label="Abbreviation" hint="Short name for reports" id="school_abbreviation">
-              <input id="school_abbreviation" name="school_abbreviation" value={form.school_abbreviation} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. DPS" />
-            </Field>
-            <Field label="Email" id="school_email">
-              <input id="school_email" type="email" name="school_email" value={form.school_email} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="school@example.com" />
-            </Field>
-            <Field label="Phone" id="school_phone">
-              <input id="school_phone" type="tel" name="school_phone" value={form.school_phone} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="+91 XXXXX XXXXX" />
-            </Field>
-            <Field label="Address" id="school_address">
-              <textarea id="school_address" name="school_address" value={form.school_address} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)] resize-none" rows={2} placeholder="Full school address" />
-            </Field>
-          </Section>
+        <SECTION title="School Information" index={0} className="md:col-span-2">
+          <Field label="School Name" hint="Displayed across all modules" id="school_name">
+            <input id="school_name" name="school_name" value={form.school_name} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. DPS Nagpur" />
+          </Field>
+          <Field label="Abbreviation" hint="Short name for reports" id="school_abbreviation">
+            <input id="school_abbreviation" name="school_abbreviation" value={form.school_abbreviation} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. DPS" />
+          </Field>
+          <Field label="Email" id="school_email">
+            <input id="school_email" type="email" name="school_email" value={form.school_email} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="school@example.com" />
+          </Field>
+          <Field label="Phone" id="school_phone">
+            <input id="school_phone" type="tel" name="school_phone" value={form.school_phone} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="+91 XXXXX XXXXX" />
+          </Field>
+          <Field label="Address" id="school_address">
+            <textarea id="school_address" name="school_address" value={form.school_address} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)] resize-none" rows={2} placeholder="Full school address" />
+          </Field>
+        </SECTION>
 
-          <Section title="Academic Configuration" index={1} className="md:col-span-1">
-            <Field label="Academic Year" hint="Current academic year" id="academic_year" column>
-              <input id="academic_year" name="academic_year" value={form.academic_year} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. 2025-26" />
-            </Field>
-            <Field label="Academic Term" id="academic_term" column>
-              <input id="academic_term" name="academic_term" value={form.academic_term} onChange={handleChange}
-                className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. Term 1" />
-            </Field>
-            <Field label="Max Students / Section" id="max_students_per_section" column>
-              <input id="max_students_per_section" type="number" name="max_students_per_section" value={form.max_students_per_section}
-                onChange={handleChange} className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" min="1" max="200" />
-            </Field>
-          </Section>
+        <SECTION title="Academic Configuration" index={1} className="md:col-span-1">
+          <Field label="Academic Year" hint="Current academic year" id="academic_year" column>
+            <input id="academic_year" name="academic_year" value={form.academic_year} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. 2025-26" />
+          </Field>
+          <Field label="Academic Term" id="academic_term" column>
+            <input id="academic_term" name="academic_term" value={form.academic_term} onChange={handleChange}
+              className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" placeholder="e.g. Term 1" />
+          </Field>
+          <Field label="Max Students / Section" id="max_students_per_section" column>
+            <input id="max_students_per_section" type="number" name="max_students_per_section" value={form.max_students_per_section}
+              onChange={handleChange} className="input shadow-[inset_0_1px_2px_rgba(0,0,0,0.04)]" min="1" max="200" />
+          </Field>
+        </SECTION>
 
-          <Section title="System Configuration" index={2} className="md:col-span-3">
-            <Field label="Language" id="language">
-              <SelectField id="language" name="language" value={form.language} onChange={handleChange}
-                options={[
-                  { value: 'en', label: 'English' },
-                  { value: 'hi', label: 'Hindi' },
-                  { value: 'mr', label: 'Marathi' },
-                ]} />
-            </Field>
-            <Field label="Timezone" id="time_zone">
-              <SelectField id="time_zone" name="time_zone" value={form.time_zone} onChange={handleChange}
-                options={[
-                  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST, UTC+5:30)' },
-                  { value: 'Asia/Dubai', label: 'Asia/Dubai (GST, UTC+4)' },
-                  { value: 'UTC', label: 'UTC' },
-                ]} />
-            </Field>
-            <Field label="Date Format" id="date_format">
-              <SelectField id="date_format" name="date_format" value={form.date_format} onChange={handleChange}
-                options={[
-                  { value: 'dd-mm-yyyy', label: 'DD-MM-YYYY' },
-                  { value: 'mm-dd-yyyy', label: 'MM-DD-YYYY' },
-                  { value: 'yyyy-mm-dd', label: 'YYYY-MM-DD' },
-                ]} />
-            </Field>
-            <Field label="Currency" id="currency">
-              <SelectField id="currency" name="currency" value={form.currency} onChange={handleChange}
-                options={[
-                  { value: 'INR', label: 'INR — Indian Rupee' },
-                  { value: 'USD', label: 'USD — US Dollar' },
-                  { value: 'EUR', label: 'EUR — Euro' },
-                  { value: 'AED', label: 'AED — UAE Dirham' },
-                ]} />
-            </Field>
-          </Section>
+        <SECTION title="System Configuration" index={2} className="md:col-span-3">
+          <Field label="Language" id="language">
+            <SelectField id="language" name="language" value={form.language} onChange={handleChange}
+              options={[
+                { value: 'en', label: 'English' },
+                { value: 'hi', label: 'Hindi' },
+                { value: 'mr', label: 'Marathi' },
+              ]} />
+          </Field>
+          <Field label="Timezone" id="time_zone">
+            <SelectField id="time_zone" name="time_zone" value={form.time_zone} onChange={handleChange}
+              options={[
+                { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST, UTC+5:30)' },
+                { value: 'Asia/Dubai', label: 'Asia/Dubai (GST, UTC+4)' },
+                { value: 'UTC', label: 'UTC' },
+              ]} />
+          </Field>
+          <Field label="Date Format" id="date_format">
+            <SelectField id="date_format" name="date_format" value={form.date_format} onChange={handleChange}
+              options={[
+                { value: 'dd-mm-yyyy', label: 'DD-MM-YYYY' },
+                { value: 'mm-dd-yyyy', label: 'MM-DD-YYYY' },
+                { value: 'yyyy-mm-dd', label: 'YYYY-MM-DD' },
+              ]} />
+          </Field>
+          <Field label="Currency" id="currency">
+            <SelectField id="currency" name="currency" value={form.currency} onChange={handleChange}
+              options={[
+                { value: 'INR', label: 'INR — Indian Rupee' },
+                { value: 'USD', label: 'USD — US Dollar' },
+                { value: 'EUR', label: 'EUR — Euro' },
+                { value: 'AED', label: 'AED — UAE Dirham' },
+              ]} />
+          </Field>
+        </SECTION>
+
         {/* Bottom Bar */}
         <div className="md:col-span-3 p-3 bg-white/70 backdrop-blur-xl border border-[var(--color-border)] rounded-[var(--radius-sm)] flex items-center justify-between">
           <div className="flex items-center gap-2">

@@ -17,6 +17,7 @@ from app.modules.library.router import router as library_router
 from app.modules.staff.router import router as staff_router
 from app.modules.parent.router import router as parent_router
 from app.modules.homework.router import router as homework_router
+from app.modules.admin.router import router as admin_router
 
 app = FastAPI(title=settings.APP_NAME)
 app.state.limiter = limiter
@@ -45,6 +46,7 @@ app.include_router(library_router)
 app.include_router(staff_router)
 app.include_router(parent_router)
 app.include_router(homework_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

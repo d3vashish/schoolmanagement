@@ -3,3 +3,12 @@ dist
 .env
 .claude
 *.local
+.mcp.json
+opencode.json
+skills-lock.json
+task.md
+walkthrough.md
+memory.md
+MEMORY.md
+implementation_plan.md
+ARCHITECTURE_ANALYSIS.md

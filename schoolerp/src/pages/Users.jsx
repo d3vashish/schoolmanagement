@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { deleteUser, getList } from '../api/frappe';
+import { adminListUsers, adminToggleUserStatus } from '../api/frappe';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import UserModal from '../components/UserModal';
 import Pagination from '../components/Pagination';
@@ -24,12 +24,22 @@ const avatarColors = [
 const ROLE_PALETTE = [
   'bg-[#E8F9ED] text-[#25B04E]',
   'bg-emerald-50 text-emerald-700',
-  'bg-emerald-50 text-emerald-700',
   'bg-rose-50 text-rose-700',
   'bg-cyan-50 text-cyan-700',
   'bg-purple-50 text-purple-700',
   'bg-blue-50 text-blue-700',
+  'bg-amber-50 text-amber-700',
 ];
+
+const ROLE_LABELS = {
+  super_admin: 'Super Admin',
+  principal: 'Principal',
+  teacher: 'Teacher',
+  accountant: 'Accountant',
+  librarian: 'Librarian',
+  parent: 'Parent',
+  student: 'Student',
+};
 
 const roleColorCache = {};
 let colorIndex = 0;
@@ -40,37 +50,6 @@ const getRoleColor = (role) => {
     colorIndex++;
   }
   return roleColorCache[role];
-};
-
-const fetchUsersWithRoles = async () => {
-  const [instructorUsers, accountantUsers] = await Promise.all([
-    getList('User', [['enabled', '=', 1], ['Has Role', 'role', '=', 'Instructor']],
-      ['name', 'first_name', 'last_name', 'email', 'enabled'], 200),
-    getList('User', [['enabled', '=', 1], ['Has Role', 'role', '=', 'Accountant']],
-      ['name', 'first_name', 'last_name', 'email', 'enabled'], 200),
-  ]);
-
-  const userMap = new Map();
-  (instructorUsers || []).forEach(u => {
-    if (u.name !== 'Guest' && u.name !== 'Administrator') {
-      userMap.set(u.name, { ...u, roles: ['Instructor'] });
-    }
-  });
-  (accountantUsers || []).forEach(u => {
-    if (u.name !== 'Guest' && u.name !== 'Administrator') {
-      if (userMap.has(u.name)) {
-        userMap.get(u.name).roles.push('Accountant');
-      } else {
-        userMap.set(u.name, { ...u, roles: ['Accountant'] });
-      }
-    }
-  });
-
-  const usersList = [...userMap.values()];
-  const rolesMap = {};
-  usersList.forEach(u => { rolesMap[u.name] = u.roles; });
-
-  return { users: usersList, rolesMap };
 };
 
 export default function Users() {
@@ -84,21 +63,27 @@ export default function Users() {
   const USERS_PER_PAGE = 12;
 
   const { data, isLoading: loading } = useQuery({
-    queryKey: ['User', 'team-directory'],
-    queryFn: fetchUsersWithRoles,
+    queryKey: ['admin', 'users', { role: roleFilter, search, page, page_size: USERS_PER_PAGE }],
+    queryFn: () => adminListUsers({
+      page,
+      page_size: USERS_PER_PAGE,
+      role: roleFilter || undefined,
+      search: search || undefined,
+    }),
   });
 
-  const users = data?.users || [];
-  const userRoles = data?.rolesMap || {};
-  const availableRoles = ['Instructor', 'Accountant'];
+  const users = data?.data || [];
+  const total = data?.total || 0;
+  const totalPages = Math.ceil(total / USERS_PER_PAGE);
+  const availableRoles = ['teacher', 'accountant', 'principal', 'librarian'];
 
-  const deleteMutation = useMutation({
-    mutationFn: deleteUser,
-    onSuccess: (_, email) => {
-      queryClient.invalidateQueries({ queryKey: ['User'] });
-      showToast(`User ${email} deleted`);
+  const toggleMutation = useMutation({
+    mutationFn: adminToggleUserStatus,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
+      showToast('User status updated');
     },
-    onError: () => showToast('Failed to delete user'),
+    onError: () => showToast('Failed to update user'),
   });
 
   const showToast = (msg) => {
@@ -106,25 +91,11 @@ export default function Users() {
     setTimeout(() => setToast(''), 3000);
   };
 
-  const handleDelete = (email) => {
-    if (!window.confirm(`Delete user "${email}"? This cannot be undone.`)) return;
-    deleteMutation.mutate(email);
+  const handleToggleStatus = (user) => {
+    const action = user.is_active ? 'disable' : 'enable';
+    if (!window.confirm(`${action === 'disable' ? 'Disable' : 'Enable'} user "${user.email}"?`)) return;
+    toggleMutation.mutate(user.id);
   };
-
-  const filtered = users.filter(u => {
-    if (roleFilter && !(userRoles[u.name] || []).includes(roleFilter)) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (u.name || '').toLowerCase().includes(q)
-      || (u.first_name || '').toLowerCase().includes(q)
-      || (u.last_name || '').toLowerCase().includes(q);
-  });
-
-  const totalPages = Math.ceil(filtered.length / USERS_PER_PAGE);
-  const paginatedUsers = filtered.slice(
-    (page - 1) * USERS_PER_PAGE,
-    page * USERS_PER_PAGE
-  );
 
   return (
     <div className="space-y-10 max-w-7xl mx-auto pb-16">
@@ -139,7 +110,7 @@ export default function Users() {
         <div>
           <div className="eyebrow">People</div>
           <h1 className="text-[2rem] sm:text-[2.5rem] font-extrabold text-[#2D2A24] tracking-tight leading-[1.1] -mt-1">Team Directory</h1>
-          <p className="text-[#8A8680] mt-2 font-medium text-sm">{users.length} faculty &amp; staff members</p>
+          <p className="text-[#8A8680] mt-2 font-medium text-sm">{total} faculty &amp; staff members</p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
           <div className="relative">
@@ -148,12 +119,12 @@ export default function Users() {
             </svg>
             <select
               value={roleFilter}
-              onChange={e => setRoleFilter(e.target.value)}
+              onChange={e => { setRoleFilter(e.target.value); setPage(1); }}
               className="input py-2.5 pl-9 pr-8 w-44 text-sm font-medium text-[#2D2A24] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.02)] border border-[#e2e8f0] appearance-none cursor-pointer transition-[border-color,box-shadow] duration-200 focus:border-[#2ED05D] focus:shadow-[0_0_0_3px_rgba(46,208,93,0.12)]"
             >
               <option value="">All Roles</option>
               {availableRoles.map(role => (
-                <option key={role} value={role}>{role}</option>
+                <option key={role} value={role}>{ROLE_LABELS[role] || role}</option>
               ))}
             </select>
             <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#8A8680]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -166,13 +137,13 @@ export default function Users() {
             </svg>
             <input
               type="text"
-              placeholder="Search directory..."
+              placeholder="Search by email..."
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
               className="input py-2.5 pl-[38px] pr-4 w-56 sm:w-64 text-sm font-medium text-[#2D2A24] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_1px_2px_rgba(0,0,0,0.02)] border border-[#e2e8f0] transition-[border-color,box-shadow] duration-200 placeholder:text-[#B0ABA4] focus:border-[#2ED05D] focus:shadow-[0_0_0_3px_rgba(46,208,93,0.12)]"
             />
           </div>
-          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['User'] })}
+          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['admin', 'users'] })}
             className="p-2.5 bg-white border border-[#e2e8f0] shadow-[0_1px_3px_rgba(0,0,0,0.04)] rounded-xl transition-[color,background-color,transform,box-shadow] duration-200 hover:bg-[#E8F9ED] hover:border-[#BBF7D0] hover:text-[#2ED05D] cursor-pointer text-[#8A8680] active:scale-[0.95] group"
             title="Refresh">
             <svg className={`w-5 h-5 transition-transform duration-300 group-hover:rotate-180 ${loading ? 'animate-spin text-[#2ED05D]' : ''}`} style={{ animationDuration: '1s' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -197,13 +168,13 @@ export default function Users() {
           <span className="text-xs text-[#B0ABA4] mt-1 transition-colors duration-200 group-hover:text-[#B0ABA4]">Invite a new member</span>
         </button>
 
-        {paginatedUsers.map((user, i) => {
+        {users.map((user, i) => {
           const colors = avatarColors[i % avatarColors.length];
           return (
             <div
-              key={user.name}
+              key={user.id}
               className="group relative bg-white rounded-[28px] p-7 border border-[#f1f5f9]/80 shadow-[0_2px_8px_rgba(0,0,0,0.02),0_1px_2px_rgba(0,0,0,0.02)] transition-[border-color,transform,box-shadow] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.06),0_4px_12px_-4px_rgba(0,0,0,0.03)] hover:border-[#BBF7D0] cursor-pointer flex flex-col min-h-[280px] active:scale-[0.98]"
-              onClick={() => navigate(`/users/${encodeURIComponent(user.name)}`)}
+              onClick={() => navigate(`/admin/users/${user.id}`)}
             >
               {/* Top row: avatar + status */}
               <div className="flex items-start justify-between mb-5">
@@ -214,26 +185,24 @@ export default function Users() {
                   {getInitials(user.first_name, user.last_name)}
                 </div>
                 <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f1f5f9]/50 transition-[background-color] duration-200 group-hover:bg-[#f1f5f9]">
-                  <span className={`w-[6px] h-[6px] rounded-full ${user.enabled ? 'bg-emerald-500' : 'bg-red-400'}`} />
-                  <span className="text-[10px] font-bold text-[#8A8680] uppercase tracking-wider">{user.enabled ? 'Active' : 'Inactive'}</span>
+                  <span className={`w-[6px] h-[6px] rounded-full ${user.is_active ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                  <span className="text-[10px] font-bold text-[#8A8680] uppercase tracking-wider">{user.is_active ? 'Active' : 'Inactive'}</span>
                 </div>
               </div>
 
               {/* Name + email */}
               <div className="mb-4">
                 <h3 className="font-extrabold text-[#2D2A24] text-[17px] leading-tight tracking-tight truncate">
-                  {user.first_name || user.name} {user.last_name || ''}
+                  {user.first_name || user.email} {user.last_name || ''}
                 </h3>
-                <p className="text-sm font-medium text-[#8A8680] truncate mt-0.5" title={user.name}>{user.name}</p>
+                <p className="text-sm font-medium text-[#8A8680] truncate mt-0.5" title={user.email}>{user.email}</p>
               </div>
 
-              {/* Role tags */}
+              {/* Role tag */}
               <div className="flex flex-wrap gap-1.5 mb-5 flex-1 content-start">
-                {(userRoles[user.name] || []).slice(0, 3).map(role => (
-                  <span key={role} className={`text-[11px] font-bold px-2.5 py-1 rounded-[8px] ${getRoleColor(role)}`}>
-                    {role}
-                  </span>
-                ))}
+                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-[8px] ${getRoleColor(user.role)}`}>
+                  {ROLE_LABELS[user.role] || user.role}
+                </span>
               </div>
 
               {/* Bottom bar */}
@@ -245,12 +214,16 @@ export default function Users() {
                   </svg>
                 </span>
                 <button
-                  onClick={(e) => { e.stopPropagation(); handleDelete(user.name); }}
-                  className="p-2 text-[#B0ABA4] transition-[color,background-color,transform] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:text-red-500 hover:bg-red-50 rounded-[10px] cursor-pointer active:scale-[0.92]"
-                  title="Delete User"
+                  onClick={(e) => { e.stopPropagation(); handleToggleStatus(user); }}
+                  className={`p-2 transition-[color,background-color,transform] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] rounded-[10px] cursor-pointer active:scale-[0.92] ${user.is_active ? 'text-[#B0ABA4] hover:text-red-500 hover:bg-red-50' : 'text-[#2ED05D] hover:text-emerald-600 hover:bg-emerald-50'}`}
+                  title={user.is_active ? 'Disable User' : 'Enable User'}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    {user.is_active ? (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    ) : (
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    )}
                   </svg>
                 </button>
               </div>
@@ -263,7 +236,7 @@ export default function Users() {
         <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
       )}
 
-      {!loading && filtered.length === 0 && (
+      {!loading && users.length === 0 && (
         <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-[28px] border border-[#f1f5f9] shadow-[0_2px_8px_rgba(0,0,0,0.02)] mt-2">
           <div className="w-[72px] h-[72px] rounded-[20px] bg-[#E8F9ED] flex items-center justify-center mb-5">
             <svg className="w-8 h-8 text-[#2ED05D]/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -282,7 +255,7 @@ export default function Users() {
         onClose={() => setShowModal(false)}
         onSuccess={() => {
           setShowModal(false);
-          queryClient.invalidateQueries({ queryKey: ['User'] });
+          queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
           showToast('User created successfully!');
         }}
       />

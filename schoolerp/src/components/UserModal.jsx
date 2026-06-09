@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { createUser, createDoc, checkUserExists } from '../api/frappe';
+import { adminCreateUser } from '../api/frappe';
 
 const commonPasswords = ['password', '123456', '12345678', 'qwerty', 'admin', 'letmein', 'welcome', 'monkey', 'dragon', 'master', 'login', 'abc123', 'passw0rd'];
 
@@ -13,14 +13,19 @@ const getPasswordError = (pw) => {
   return null;
 };
 
-const roleOptions = ['Principal', 'Instructor', 'Accountant'];
+const ROLE_OPTIONS = [
+  { value: 'teacher', label: 'Teacher' },
+  { value: 'principal', label: 'Principal' },
+  { value: 'accountant', label: 'Accountant' },
+  { value: 'librarian', label: 'Librarian' },
+];
 
 export default function UserModal({ show, onClose, onSuccess }) {
   const [formData, setFormData] = useState({
     email: '',
     first_name: '',
     last_name: '',
-    mobile_no: '',
+    phone: '',
     password: '',
     confirmPassword: '',
     role: '',
@@ -58,47 +63,31 @@ export default function UserModal({ show, onClose, onSuccess }) {
 
     setLoading(true);
     try {
-      const exists = await checkUserExists(formData.email);
-      if (exists) {
-        setError('A user with this email already exists');
-        setLoading(false);
-        return;
-      }
-
-      await createUser({
+      await adminCreateUser({
         email: formData.email,
         first_name: formData.first_name,
-        last_name: formData.last_name,
-        mobile_no: formData.mobile_no,
+        last_name: formData.last_name || null,
+        phone: formData.phone || null,
         password: formData.password,
-        roles: [{ role: formData.role }],
+        role: formData.role,
       });
-
-      if (formData.role === 'Instructor') {
-        await createDoc('Instructor', {
-          instructor_name: `${formData.first_name} ${formData.last_name}`.trim(),
-          user: formData.email,
-        }).catch(() => {});
-      }
 
       setFormData({
         email: '',
         first_name: '',
         last_name: '',
-        mobile_no: '',
+        phone: '',
         password: '',
         confirmPassword: '',
         role: '',
       });
       onSuccess();
     } catch (err) {
-      const msg = err.readableMessage || err.message || 'Failed to create user';
-      if (msg.includes('already exists') || msg.includes('Duplicate entry')) {
+      const detail = err.response?.data?.detail || err.message || 'Failed to create user';
+      if (detail.includes('already registered') || detail.includes('already exists')) {
         setError('A user with this email already exists');
-      } else if (msg.includes('password') && (msg.includes('common') || msg.includes('weak'))) {
-        setError('Password is too weak. Use a mix of uppercase, lowercase, numbers, and special characters.');
       } else {
-        setError(msg);
+        setError(detail);
       }
     } finally {
       setLoading(false);
@@ -134,7 +123,7 @@ export default function UserModal({ show, onClose, onSuccess }) {
               <label className="block text-sm font-medium text-[#1e293b] mb-2">Role <span className="text-red-500">*</span></label>
               <select name="role" value={formData.role} onChange={handleChange} className="input" required>
                 <option value="">Select Role</option>
-                {roleOptions.map(role => <option key={role} value={role}>{role}</option>)}
+                {ROLE_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
             </div>
             <div>
@@ -146,8 +135,8 @@ export default function UserModal({ show, onClose, onSuccess }) {
               <input type="text" name="last_name" value={formData.last_name} onChange={handleChange} className="input" placeholder="Doe" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-[#1e293b] mb-2">Mobile Number</label>
-              <input type="tel" name="mobile_no" value={formData.mobile_no} onChange={handleChange} className="input" placeholder="+91 9876543210" />
+              <label className="block text-sm font-medium text-[#1e293b] mb-2">Phone</label>
+              <input type="tel" name="phone" value={formData.phone} onChange={handleChange} className="input" placeholder="+91 9876543210" />
             </div>
             <div />
             <div>
