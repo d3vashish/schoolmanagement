@@ -98,7 +98,10 @@ export default function Students() {
   const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
     queryKey: ['Student', 'students', selectedSection?.name, studentPage, search],
     queryFn: async () => {
-      if (!selectedSection?.name) return { data: [], total: 0, total_pages: 1 };
+      if (!selectedSection?.name) {
+        console.warn('[Students] queryFn skipped: selectedSection?.name is', selectedSection?.name, 'selectedSection is', selectedSection);
+        return { data: [], total: 0, total_pages: 1 };
+      }
 
       const params = new URLSearchParams({
         section_id: selectedSection.name,
@@ -107,7 +110,9 @@ export default function Students() {
       });
       if (search) params.set('search', search);
 
+      console.log('[Students] queryFn firing with params:', params.toString(), 'section:', selectedSection.name);
       const res = await client.get(`/academic/students?${params}`);
+      console.log('[Students] queryFn got response:', res.data);
       return res.data;
     },
     enabled: !!selectedSection?.name,
@@ -248,6 +253,7 @@ export default function Students() {
   };
 
   const goToStudents = (section) => {
+    console.log('[Students] goToStudents called with section:', { name: section.name, program: section.program, label: section.label, student_group_name: section.student_group_name });
     setSelectedSection(section);
     setView('students');
     setSearch('');
