@@ -73,9 +73,9 @@ export default function Students() {
   const standards = roleCheck.isTeacher(user)
     ? (user.mySection ? [{ name: user.mySection.program, label: user.mySection.program, count: 1 }] : [])
     : allPrograms.map(p => ({
-        name: p.name,
+        name: p.program_name || p.name,
         label: p.program_name || p.name,
-        count: yearGroups.filter(sg => sg.program === p.name).length,
+        count: yearGroups.filter(sg => sg.program === (p.program_name || p.name)).length,
       }));
   const loadingStandards = loadingPrograms;
 
