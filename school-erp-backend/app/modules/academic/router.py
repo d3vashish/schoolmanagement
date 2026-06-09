@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -39,6 +40,7 @@ from app.modules.academic.schemas import (
     SectionResponse,
     StudentCreate,
     StudentProfileResponse,
+    StudentSearchResponse,
     StudentUpdate,
     SubjectCreate,
     SubjectResponse,
@@ -472,6 +474,60 @@ async def delete_student(student_id: str, db: AsyncSession = Depends(get_db)):
         user.deleted_at = datetime.now(timezone.utc)
         user.is_active = False
     await db.flush()
+
+
+@router.get("/students/search", response_model=list[StudentSearchResponse])
+async def search_students(
+    q: str = "",
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    role = current_user["role"]
+    if role not in ("super_admin", "principal", "teacher", "librarian", "accountant", "parent"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    query = select(
+        StudentProfile.id,
+        StudentProfile.first_name,
+        StudentProfile.last_name,
+        StudentProfile.admission_number,
+        StudentProfile.class_id,
+        StudentProfile.section_id,
+        AcademicClass.name.label("student_group_name"),
+        Section.name.label("section_name"),
+        User.email,
+    ).join(User, StudentProfile.user_id == User.id
+    ).outerjoin(AcademicClass, StudentProfile.class_id == AcademicClass.id
+    ).outerjoin(Section, StudentProfile.section_id == Section.id)
+
+    if q:
+        query = query.where(
+            StudentProfile.first_name.ilike(f"%{q}%")
+            | StudentProfile.last_name.ilike(f"%{q}%")
+            | StudentProfile.admission_number.ilike(f"%{q}%")
+            | User.email.ilike(f"%{q}%")
+        )
+
+    scope = QueryScoper.for_students(db, current_user)
+    if scope is not None:
+        query = query.where(scope)
+
+    query = query.limit(20)
+    result = await db.execute(query)
+    rows = result.all()
+    return [
+        StudentSearchResponse(
+            id=r.id,
+            first_name=r.first_name,
+            last_name=r.last_name,
+            admission_number=r.admission_number,
+            class_id=r.class_id,
+            student_group_name=r.student_group_name,
+            section_name=r.section_name,
+            email=r.email,
+        )
+        for r in rows
+    ]
 
 
 # ── Instructor Single CRUD ────────────────────────────────────────────────

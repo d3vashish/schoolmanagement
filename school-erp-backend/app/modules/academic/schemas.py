@@ -124,6 +124,19 @@ class StudentProfileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StudentSearchResponse(BaseModel):
+    id: UUID
+    first_name: str
+    last_name: str
+    admission_number: str
+    class_id: UUID | None = None
+    student_group_name: str | None = None
+    section_name: str | None = None
+    email: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class InstructorResponse(BaseModel):
     id: UUID
     user_id: UUID
