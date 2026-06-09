@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func as sa_func, select
 from sqlalchemy.orm import joinedload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.modules.academic.schemas import (
     ClassResponse,
     EnrollmentCreate,
     EnrollmentResponse,
+    PaginatedStudentResponse,
     HolidayCreate,
     HolidayResponse,
     InstructorCreate,
@@ -242,8 +243,12 @@ async def list_progressions(
     return result.scalars().all()
 
 
-@router.get("/students", response_model=list[StudentProfileResponse])
+@router.get("/students", response_model=PaginatedStudentResponse)
 async def list_students(
+    section_id: Optional[str] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    per_page: int = 100,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -265,31 +270,49 @@ async def list_students(
         User.is_active,
     ).join(User, StudentProfile.user_id == User.id).outerjoin(AcademicClass, StudentProfile.class_id == AcademicClass.id)
 
+    if section_id:
+        query = query.where(StudentProfile.section_id == section_id)
+
+    if search:
+        like = f"%{search}%"
+        query = query.where(
+            StudentProfile.first_name.ilike(like)
+            | StudentProfile.last_name.ilike(like)
+            | StudentProfile.admission_number.ilike(like)
+            | User.email.ilike(like)
+        )
+
+    query = query.order_by(StudentProfile.first_name)
+
     scope = QueryScoper.for_students(db, current_user)
     if scope is not None:
         query = query.where(scope)
 
+    count_query = select(sa_func.count()).select_from(query.subquery())
+    total = (await db.execute(count_query)).scalar() or 0
+
+    offset = (page - 1) * per_page
+    query = query.offset(offset).limit(per_page)
+
     result = await db.execute(query)
     rows = result.all()
-    return [
-        StudentProfileResponse(
-            id=r.id,
-            user_id=r.user_id,
-            first_name=r.first_name,
-            last_name=r.last_name,
-            date_of_birth=r.date_of_birth,
-            admission_number=r.admission_number,
-            class_id=r.class_id,
-            student_group_name=r.student_group_name,
-            guardian_name=r.guardian_name,
-            guardian_phone=r.guardian_phone,
-            address=r.address,
-            email=r.email,
-            is_active=r.is_active,
-            creation=r.created_at,
-        )
-        for r in rows
-    ]
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return PaginatedStudentResponse(
+        data=[
+            StudentProfileResponse(
+                id=r.id, user_id=r.user_id, first_name=r.first_name, last_name=r.last_name,
+                date_of_birth=r.date_of_birth, admission_number=r.admission_number,
+                class_id=r.class_id, student_group_name=r.student_group_name,
+                guardian_name=r.guardian_name, guardian_phone=r.guardian_phone,
+                address=r.address, email=r.email, is_active=r.is_active, creation=r.created_at,
+            )
+            for r in rows
+        ],
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/instructors", response_model=list[InstructorResponse])

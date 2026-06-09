@@ -124,6 +124,14 @@ class StudentProfileResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaginatedStudentResponse(BaseModel):
+    data: list[StudentProfileResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
 class StudentSearchResponse(BaseModel):
     id: UUID
     first_name: str
