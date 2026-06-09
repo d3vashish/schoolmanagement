@@ -42,6 +42,10 @@ const Admissions = lazy(() => import('./pages/Admissions'));
 const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
 const ParentChildView = lazy(() => import('./pages/ParentChildView'));
 const ExamManagement = lazy(() => import('./pages/ExamManagement'));
+const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
+const AuditLog = lazy(() => import('./pages/AuditLog'));
+const AdminUserDetail = lazy(() => import('./pages/AdminUserDetail'));
+const StudentLookup = lazy(() => import('./pages/StudentLookup'));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center py-20">
@@ -66,6 +70,7 @@ function App() {
 
                   {/* ── Academic ── */}
                   <Route path="students" element={<Students />} />
+                  <Route path="students/lookup" element={<StudentLookup />} />
                   <Route path="students/:id" element={<StudentDetail />} />
                   <Route path="classes" element={<Classes />} />
                   <Route path="subjects" element={<Subjects />} />
@@ -100,8 +105,11 @@ function App() {
                   <Route path="parent/child/:childId" element={<ParentChildView />} />
 
                   {/* ── Admin ── */}
+                  <Route path="admin" element={<AdminDashboard />} />
+                  <Route path="admin/users/:id" element={<AdminUserDetail />} />
                   <Route path="users" element={<Users />} />
                   <Route path="users/:email" element={<UserDetail />} />
+                  <Route path="audit-log" element={<AuditLog />} />
 
                   {/* ── Legacy redirects ── */}
                   <Route path="programs" element={<Navigate to="/classes" replace />} />
