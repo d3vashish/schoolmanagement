@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, getDoc, createDoc, updateDoc, deleteDoc, adminGetList, adminCallMethod } from '../api/frappe';
+import { getList, getDoc, createDoc, updateDoc, deleteDoc } from '../api/frappe';
+import { isAdmin, isTeacher, canManageStudents, canDeleteStudent, canManageStandards, canManageSections } from '../utils/roles';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Pagination from '../components/Pagination';
@@ -17,8 +18,7 @@ export default function Students() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const isTeacher = user?.roles?.includes('teacher');
-  const isAdmin = user?.roles?.includes('super_admin') || user?.roles?.includes('principal');
+  const roleCheck = { isAdmin, isTeacher, canManageStudents, canDeleteStudent, canManageStandards, canManageSections };
 
   // Admin-only: add standard / section
   const [showAddStandard, setShowAddStandard]   = useState(false);
@@ -70,7 +70,7 @@ export default function Students() {
 
   // For admins: show ALL programs with section count from yearGroups
   // For teachers: show only their assigned program
-  const standards = isTeacher
+  const standards = roleCheck.isTeacher(user)
     ? (user.mySection ? [{ name: user.mySection.program, label: user.mySection.program, count: 1 }] : [])
     : allPrograms.map(p => ({
         name: p.name,
@@ -82,7 +82,7 @@ export default function Students() {
   // Derive sections from shared yearGroups
   const sections = !selectedStandard
     ? []
-    : isTeacher
+    : roleCheck.isTeacher(user)
       ? (user.mySection && user.mySection.program === selectedStandard.name
           ? [{ ...user.mySection, label: user.mySection.student_group_name?.split(' - ')[1] || user.mySection.name, teacher: null }]
           : [])
@@ -95,54 +95,27 @@ export default function Students() {
   const loadingSections = false;
 
   // Fetch students
-  const { data: students = [], isLoading: loadingStudents, error: studentError } = useQuery({
-    queryKey: ['Student', 'students', selectedSection?.name, isAdmin],
+  const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
+    queryKey: ['Student', 'students', selectedSection?.name, studentPage, search],
     queryFn: async () => {
-      if (!selectedSection) return [];
+      if (!selectedSection) return { data: [], total: 0, total_pages: 1 };
 
-      let groupDoc;
-      try {
-        if (isAdmin) {
-          groupDoc = await adminCallMethod('frappe.client.get', { doctype: 'Student Group', name: selectedSection.name });
-        } else {
-          groupDoc = await getDoc('Student Group', selectedSection.name);
-        }
-      } catch (err) {
-        console.error('Failed to fetch Student Group:', err);
-        throw new Error('Could not load section data. Please check permissions.');
-      }
+      const params = new URLSearchParams({
+        section_id: selectedSection.name,
+        page: String(studentPage),
+        per_page: String(STUDENTS_PER_PAGE),
+      });
+      if (search) params.set('search', search);
 
-      const enrollments = groupDoc?.students || [];
-      if (enrollments.length === 0) return [];
-      const studentNames = enrollments.map(e => e.student).filter(Boolean);
-      if (studentNames.length === 0) return [];
-
-      let studentDocs;
-      try {
-        if (isAdmin) {
-          studentDocs = await adminGetList('Student',
-            [['name', 'in', studentNames]],
-            ['name', 'first_name', 'last_name', 'student_name', 'enabled', 'gender', 'date_of_birth', 'student_email_id', 'student_mobile_number'],
-            500);
-        } else {
-          studentDocs = await getList('Student',
-            [['name', 'in', studentNames]],
-            ['name', 'first_name', 'last_name', 'student_name', 'enabled', 'gender', 'date_of_birth', 'student_email_id', 'student_mobile_number'],
-            500);
-        }
-      } catch (err) {
-        console.error('Failed to fetch Student records:', err);
-        throw new Error('Could not load student records. Please check permissions.');
-      }
-
-      const studentsMap = new Map(studentDocs.map(s => [s.name, s]));
-      return enrollments
-        .filter(e => !isTeacher || e.active)
-        .map(e => studentsMap.get(e.student) || { name: e.student, student_name: e.student_name, enabled: e.active })
-        .filter(Boolean);
+      const res = await fetch(`/api/academic/students?${params}`);
+      if (!res.ok) throw new Error('Failed to load students');
+      return res.json();
     },
     enabled: !!selectedSection,
   });
+
+  const students = studentsData?.data || [];
+  const totalStudentPages = studentsData?.total_pages || 1;
 
   // Mutations
   const createStandardMutation = useMutation({
@@ -203,18 +176,6 @@ export default function Students() {
   });
 
   const savingStudent = createStudentMutation.isPending || updateStudentMutation.isPending;
-
-  const filteredStudents = students.filter(s =>
-    s.student_name?.toLowerCase().includes(search.toLowerCase()) ||
-    s.first_name?.toLowerCase().includes(search.toLowerCase()) ||
-    s.name?.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const totalStudentPages = Math.ceil(filteredStudents.length / STUDENTS_PER_PAGE);
-  const paginatedStudents = filteredStudents.slice(
-    (studentPage - 1) * STUDENTS_PER_PAGE,
-    studentPage * STUDENTS_PER_PAGE
-  );
 
   const openAddModal = () => { setEditingStudent(null); setFormData(emptyForm); setShowModal(true); };
 
@@ -309,7 +270,7 @@ export default function Students() {
           <p className="text-[var(--color-text-secondary)] mt-1">Manage student records</p>
         </div>
 
-        {view === 'standards' && isAdmin && (
+        {view === 'standards' && roleCheck.canManageStandards(user) && (
           <button onClick={() => setShowAddStandard(true)} className="btn-primary flex items-center gap-2 group">
             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -320,7 +281,7 @@ export default function Students() {
           </button>
         )}
 
-        {view === 'sections' && isAdmin && (
+        {view === 'sections' && roleCheck.canManageSections(user) && (
           <button onClick={() => setShowAddSection(true)} className="btn-primary flex items-center gap-2 group">
             <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -343,14 +304,16 @@ export default function Students() {
               </span>
               Refresh
             </button>
-            <button onClick={openAddModal} className="btn-primary flex items-center gap-2 group">
-              <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-              </span>
-              Add Student
-            </button>
+            {roleCheck.canManageStudents(user) && (
+              <button onClick={openAddModal} className="btn-primary flex items-center gap-2 group">
+                <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                </span>
+                Add Student
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -389,7 +352,7 @@ export default function Students() {
               <span className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin"></span>
               <span className="ml-3 text-[var(--color-text-secondary)]">Loading standards...</span>
             </div>
-          ) : isTeacher && standards.length === 0 ? (
+          ) : roleCheck.isTeacher(user) && standards.length === 0 ? (
             <div className="card flex flex-col items-center justify-center py-20 text-center">
               <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-4">
                 <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -479,7 +442,7 @@ export default function Students() {
               <input type="text" placeholder="Search students..." value={search}
                 onChange={(e) => setSearch(e.target.value)} className="input pl-12" />
             </div>
-            <p className="text-sm text-[var(--color-text-secondary)]">{filteredStudents.length} students</p>
+            <p className="text-sm text-[var(--color-text-secondary)]">{students.length} students</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -515,14 +478,14 @@ export default function Students() {
                       </div>
                     </td>
                   </tr>
-                ) : filteredStudents.length === 0 ? (
+                ) : students.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="table-cell text-center py-12 text-[var(--color-text-secondary)]">
-                      {search ? 'No students found' : 'No students in this section. Click "Add Student" to enroll one.'}
+                      {search ? 'No students found' : `No students in this section.${roleCheck.canManageStudents(user) ? ' Click "Add Student" to enroll one.' : ''}`}
                     </td>
                   </tr>
                 ) : (
-                  paginatedStudents.map((student) => (
+                  students.map((student) => (
                     <tr key={student.name} onClick={() => navigate(`/students/${student.name}`)} className="hover:bg-gray-50 transition-colors cursor-pointer">
                       <td className="table-cell font-medium text-[var(--color-primary)]">{student.name}</td>
                       <td className="table-cell font-medium">{student.first_name} {student.last_name}</td>
@@ -546,20 +509,24 @@ export default function Students() {
                               </svg>
                             </span>
                           </button>
-                          <button onClick={() => openEditModal(student)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer group" title="Edit">
-                            <span className="w-8 h-8 rounded-lg bg-transparent flex items-center justify-center transition-all duration-300 group-hover:bg-gray-200/50 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
-                              <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                              </svg>
-                            </span>
-                          </button>
-                          <button onClick={() => setDeleteConfirm(student)} className="p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer group" title="Delete">
-                            <span className="w-8 h-8 rounded-lg bg-transparent flex items-center justify-center transition-all duration-300 group-hover:bg-red-100/50 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
-                              <svg className="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </span>
-                          </button>
+                          {roleCheck.canManageStudents(user) && (
+                            <button onClick={() => openEditModal(student)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer group" title="Edit">
+                              <span className="w-8 h-8 rounded-lg bg-transparent flex items-center justify-center transition-all duration-300 group-hover:bg-gray-200/50 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
+                                <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                              </span>
+                            </button>
+                          )}
+                          {roleCheck.canDeleteStudent(user) && (
+                            <button onClick={() => setDeleteConfirm(student)} className="p-2 hover:bg-red-50 rounded-lg transition-colors cursor-pointer group" title="Delete">
+                              <span className="w-8 h-8 rounded-lg bg-transparent flex items-center justify-center transition-all duration-300 group-hover:bg-red-100/50 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
+                                <svg className="w-3.5 h-3.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </span>
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
