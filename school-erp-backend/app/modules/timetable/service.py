@@ -7,7 +7,7 @@ from app.modules.timetable.models import TimetableSlot
 
 async def check_conflicts(
     section_id: str,
-    teacher_id: str,
+    instructor_id: str,
     day_of_week: int,
     period_no: int,
     academic_year_id: str,
@@ -30,7 +30,7 @@ async def check_conflicts(
 
     teacher_conflict = await db.execute(
         select(TimetableSlot).where(
-            TimetableSlot.teacher_id == teacher_id,
+            TimetableSlot.instructor_id == instructor_id,
             TimetableSlot.day_of_week == day_of_week,
             TimetableSlot.period_no == period_no,
             TimetableSlot.academic_year_id == academic_year_id,
@@ -47,7 +47,7 @@ async def check_conflicts(
 async def create_slot(data: dict, db: AsyncSession) -> TimetableSlot:
     await check_conflicts(
         section_id=data["section_id"],
-        teacher_id=data["teacher_id"],
+        instructor_id=data["instructor_id"],
         day_of_week=data["day_of_week"],
         period_no=data["period_no"],
         academic_year_id=data["academic_year_id"],
@@ -67,7 +67,7 @@ async def update_slot(slot_id: str, data: dict, db: AsyncSession) -> TimetableSl
 
     await check_conflicts(
         section_id=data.get("section_id", str(slot.section_id)),
-        teacher_id=data.get("teacher_id", str(slot.teacher_id)),
+        instructor_id=data.get("instructor_id", str(slot.instructor_id)),
         day_of_week=data.get("day_of_week", slot.day_of_week),
         period_no=data.get("period_no", slot.period_no),
         academic_year_id=data.get("academic_year_id", str(slot.academic_year_id)),

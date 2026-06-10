@@ -15,7 +15,6 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Students = lazy(() => import('./pages/Students'));
 const StudentDetail = lazy(() => import('./pages/StudentDetail'));
 const Courses = lazy(() => import('./pages/Courses'));
-const Schedule = lazy(() => import('./pages/Schedule'));
 const Attendance = lazy(() => import('./pages/Attendance'));
 const Fees = lazy(() => import('./pages/Fees'));
 const Users = lazy(() => import('./pages/Users'));
@@ -114,7 +113,6 @@ function App() {
                   {/* ── Legacy redirects ── */}
                   <Route path="programs" element={<Navigate to="/students" replace />} />
                   <Route path="courses" element={<Navigate to="/subjects" replace />} />
-                  <Route path="schedule" element={<Navigate to="/timetable" replace />} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

@@ -10,7 +10,7 @@ class TimetableSlot(Base, TimestampMixin):
 
     section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id"), nullable=False)
     subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id"), nullable=False)
-    teacher_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    instructor_id = Column(UUID(as_uuid=True), ForeignKey("staff_profiles.id"), nullable=False)
     day_of_week = Column(Integer, nullable=False)
     period_no = Column(Integer, nullable=False)
     academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id"), nullable=False)
@@ -18,5 +18,5 @@ class TimetableSlot(Base, TimestampMixin):
 
     __table_args__ = (
         UniqueConstraint("section_id", "day_of_week", "period_no", name="uq_slot_section_day_period"),
-        UniqueConstraint("teacher_id", "day_of_week", "period_no", "academic_year_id", name="uq_slot_teacher_day_period"),
+        UniqueConstraint("instructor_id", "day_of_week", "period_no", "academic_year_id", name="uq_slot_instructor_day_period"),
     )

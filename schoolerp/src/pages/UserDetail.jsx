@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDoc, getList, updateDoc, createDoc } from '../api/frappe';
+import { getDoc, getList, updateDoc, createDoc, client } from '../api/frappe';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import AssignClassModal from '../components/AssignClassModal';
 import AssignStudentGroupModal from '../components/AssignStudentGroupModal';
 
 const Icons = {
@@ -92,8 +91,20 @@ const fetchUserProfile = async (email) => {
 
   if (instDoc) {
     auxPromises.push(
-      getList('Course Schedule', [['instructor', '=', instDoc.name]], ['name', 'course', 'student_group', 'schedule_date', 'from_time', 'to_time', 'room'], 200)
-        .then(res => schedules = res).catch(() => { })
+      client.get('/timetable/slots', { params: { limit: 200 } })
+        .then(res => {
+          let items = res.data;
+          if (!Array.isArray(items)) items = items.data || items.results || [];
+          schedules = items.filter(s => String(s.instructor_id) === String(instDoc.name)).map(s => ({
+            name: s.id,
+            course: s.subject_name || s.subject_id || '',
+            student_group: s.section_id || '',
+            schedule_date: '',
+            from_time: s.period_no ? `${String(s.period_no + 7).padStart(2, '0')}:00:00` : '',
+            to_time: s.period_no ? `${String(s.period_no + 8).padStart(2, '0')}:00:00` : '',
+            room: '',
+          }));
+        }).catch(() => { })
     );
     auxPromises.push(
       // Query Student Group Instructor child table directly (avoids N+1 getDoc calls)
@@ -144,7 +155,6 @@ export default function UserDetail() {
   const queryClient = useQueryClient();
 
   const [isEditing, setIsEditing] = useState(false);
-  const [isAssigningClass, setIsAssigningClass] = useState(false);
   const [isAssigningGroup, setIsAssigningGroup] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [saving, setSaving] = useState(false);
@@ -423,12 +433,12 @@ export default function UserDetail() {
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Course Schedules</h4>
-                          <button onClick={() => setIsAssigningClass(true)} className="text-xs font-bold text-[#2ED05D] hover:text-[#25B04E] flex items-center gap-1 group">
+                          <a href="/timetable" className="text-xs font-bold text-[#2ED05D] hover:text-[#25B04E] flex items-center gap-1 group">
                             <span className="w-3.5 h-3.5 flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:translate-x-0.5 group-hover:-translate-y-[1px]">
                               <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                             </span>
                             Assign Class
-                          </button>
+                          </a>
                         </div>
                         {profile.schedules.length === 0 ? (
                           <div className="text-sm text-gray-500 italic px-3 py-2 bg-gray-50 rounded-lg border border-dashed border-gray-200">No classes assigned</div>
@@ -525,12 +535,12 @@ export default function UserDetail() {
               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                   <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider">Upcoming Schedule</h3>
-                  <button onClick={() => setIsAssigningClass(true)} className="btn-primary text-xs px-4 py-2 flex items-center gap-2 shadow-sm hover:shadow group">
+                  <a href="/timetable" className="btn-primary text-xs px-4 py-2 flex items-center gap-2 shadow-sm hover:shadow group">
                     <span className="w-3.5 h-3.5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
                       <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                     </span>
                     Schedule Class
-                  </button>
+                  </a>
                 </div>
                 {upcomingSchedules.length === 0 ? (
                   <div className="p-8 text-center text-gray-500 font-medium">No upcoming classes assigned.</div>
@@ -730,15 +740,6 @@ export default function UserDetail() {
       )}
 
       {/* Modals */}
-      <AssignClassModal
-        isOpen={isAssigningClass}
-        onClose={() => setIsAssigningClass(false)}
-        prefilledInstructor={profile.instructor?.name}
-        prefilledInstructorName={profile.instructor?.instructor_name}
-        onSuccess={(newClass) => {
-          queryClient.invalidateQueries({ queryKey: ['UserDetail', email] });
-        }}
-      />
       <AssignStudentGroupModal
         isOpen={isAssigningGroup}
         onClose={() => setIsAssigningGroup(false)}

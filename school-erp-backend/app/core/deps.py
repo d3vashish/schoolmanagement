@@ -315,7 +315,7 @@ class QueryScoper:
     @staticmethod
     def for_timetable_slots(db, current_user: dict) -> Optional[BinaryExpression]:
         from app.modules.academic.models import TeacherAssignment
-        from app.modules.auth.models import StudentProfile
+        from app.modules.auth.models import StaffProfile, StudentProfile
         from app.modules.parent.models import ParentStudentLink
         from app.modules.timetable.models import TimetableSlot
 
@@ -326,7 +326,12 @@ class QueryScoper:
             return None
 
         if role == "teacher":
-            return TimetableSlot.teacher_id == uid
+            sp = (
+                select(StaffProfile.id)
+                .where(StaffProfile.user_id == uid)
+                .scalar_subquery()
+            )
+            return TimetableSlot.instructor_id == sp
 
         if role == "student":
             from app.modules.academic.models import Enrollment

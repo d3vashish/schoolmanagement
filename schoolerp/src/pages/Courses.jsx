@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList } from '../api/frappe';
+import { getList, client } from '../api/frappe';
 import { useSubjects, useCreateSubject } from '../hooks/useSubjects';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -39,17 +39,18 @@ export default function Courses() {
   const { data: coursesRaw = [], isLoading: loadingCourses } = useSubjects();
 
   const { data: schedules = [] } = useQuery({
-    queryKey: ['Course Schedule', 'all-for-courses', selectedYear],
+    queryKey: ['timetable', 'all-for-courses', selectedYear],
     queryFn: async () => {
-      // Fetch year-scoped groups then filter schedules
-      const groups = await getList('Student Group', [['academic_year', '=', selectedYear]], ['name'], 500).catch(() => []);
-      const groupNames = groups.map(g => g.name);
-      if (groupNames.length === 0) return [];
-      return getList('Course Schedule',
-        [['student_group', 'in', groupNames]],
-        ['name', 'course', 'instructor', 'instructor_name', 'student_group', 'schedule_date', 'from_time', 'to_time', 'room'],
-        500
-      ).catch(() => []);
+      const res = await client.get('/timetable/slots', { params: { limit: 500 } });
+      let items = res.data;
+      if (!Array.isArray(items)) items = items.data || items.results || [];
+      return items.map(s => ({
+        name: s.id,
+        course: s.subject_name || s.subject_id || '',
+        instructor_name: s.instructor_name || '',
+        instructor: s.instructor_id || '',
+        student_group: s.section_id || '',
+      }));
     },
     enabled: !!selectedYear,
     staleTime: 60 * 1000,

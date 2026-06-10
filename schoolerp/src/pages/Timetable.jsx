@@ -1,14 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getDoc, getList, adminGetList, adminCallMethod, client } from '../api/frappe';
-import { useFrappeCreate, useFrappeUpdate, useFrappeDelete } from '../hooks/useFrappeQuery';
-import { useQuery } from '@tanstack/react-query';
+import { getList, adminGetList } from '../api/frappe';
+import { useTimetable } from '../hooks/useTimetable';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-const PERIODS = ['08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00'];
+const PERIODS = [
+  { no: 1, label: '08:00', time: '08:00' },
+  { no: 2, label: '09:00', time: '09:00' },
+  { no: 3, label: '10:00', time: '10:00' },
+  { no: 4, label: '11:00', time: '11:00' },
+  { no: 5, label: '12:00', time: '12:00' },
+  { no: 6, label: '13:00', time: '13:00' },
+  { no: 7, label: '14:00', time: '14:00' },
+  { no: 8, label: '15:00', time: '15:00' },
+  { no: 9, label: '16:00', time: '16:00' },
+];
 
-// Playful day-specific color themes
 const DAY_THEMES = {
   Monday:    { bg: '#E8F9ED', border: '#BBF7D0', accent: '#2ED05D', label: '#25B04E', emoji: 'M' },
   Tuesday:   { bg: '#E8F7FF', border: '#B0E0FF', accent: '#8ED8F8', label: '#2E8BB0', emoji: 'T' },
@@ -18,7 +30,6 @@ const DAY_THEMES = {
   Saturday:  { bg: '#FFE8EC', border: '#FFB0BA', accent: '#FF6B6B', label: '#C44040', emoji: 'S' },
 };
 
-// Card color palette for schedule slots (cycled per course)
 const SLOT_COLORS = [
   { bg: '#2ED05D', text: '#fff' },
   { bg: '#A98CF5', text: '#fff' },
@@ -30,10 +41,13 @@ const SLOT_COLORS = [
   { bg: '#FFB38A', text: '#5a2a00' },
 ];
 
-const emptyForm = {
-  course: '', student_group: '', instructor: '', room: '',
-  day_of_week: 'Monday', from_time: '08:00:00', to_time: '09:00:00',
-};
+const slotSchema = z.object({
+  section_id: z.string().min(1, 'Class is required'),
+  subject_id: z.string().min(1, 'Subject is required'),
+  instructor_id: z.string().min(1, 'Teacher is required'),
+  day_of_week: z.number().int().min(0).max(6),
+  period_no: z.number().int().min(1).max(9),
+});
 
 function getSlotColor(courseName) {
   if (!courseName) return SLOT_COLORS[0];
@@ -72,9 +86,8 @@ export default function Timetable() {
     ? [...new Set([user.myGroupName, ...(user.mySubjectGroups || [])].filter(Boolean))]
     : [];
 
-  const [showModal, setShowModal]   = useState(false);
-  const [editing, setEditing]       = useState(null);
-  const [form, setForm]             = useState(emptyForm);
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [hoveredSlot, setHoveredSlot] = useState(null);
 
@@ -85,200 +98,131 @@ export default function Timetable() {
     groupFilters.push(['academic_year', '=', selectedYear]);
   }
 
-  const listSchedules = async () => {
-    try {
-      const params = {};
-      if (!isTeacher && selectedGroup) params.section_id = selectedGroup;
-      if (!isTeacher && selectedYear) params.academic_year_id = selectedYear;
+  const filters = {};
+  if (!isTeacher && selectedGroup) filters.section_id = selectedGroup;
 
-      const res = await client.get('/timetable/slots', { params });
-      let items = res.data;
-      if (!Array.isArray(items)) items = items.data || items.results || [];
-      
-      return items.map(s => {
-        const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-        const dayName = typeof s.day_of_week === 'number' ? daysOfWeek[s.day_of_week] : (s.day_of_week || s.day || '');
-        
-        let fromTime = s.start_time || s.from_time || '';
-        let toTime = s.end_time || s.to_time || '';
-        if (!fromTime && s.period_no) {
-          const hour = s.period_no + 7;
-          fromTime = `${String(hour).padStart(2, '0')}:00:00`;
-          toTime = `${String(hour + 1).padStart(2, '0')}:00:00`;
-        }
+  const { slots, create, update, remove, saving } = useTimetable(filters);
 
-        return {
-          name: s.id || s.name,
-          course: s.course_name || s.subject_name || s.subject_id || s.course || '',
-          student_group: s.section_name || s.section_id || s.student_group || '',
-          day_of_week: dayName,
-          from_time: fromTime,
-          to_time: toTime,
-          room: s.room_name || s.room || '',
-          instructor_id: s.teacher_id || s.instructor || '',
-          instructor_name: s.teacher_name || s.instructor_name || '',
-          schedule_date: s.schedule_date || null
-        };
-      });
-    } catch (err) {
-      console.error(err);
-      return [];
-    }
-  };
-
-  const listCourses = () => isAdmin
-    ? adminGetList('Course', [], ['name', 'course_name'], 100)
-    : getList('Course', [], ['name', 'course_name'], 100);
-
-  const listGroups = () => isAdmin
-    ? adminGetList('Student Group', groupFilters, ['name', 'student_group_name'], 100)
-    : getList('Student Group', groupFilters, ['name', 'student_group_name'], 100);
-
-  const listInstructors = () => isAdmin
-    ? adminGetList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100)
-    : getList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100);
-
-  const { data: schedules = [], isLoading: loading } = useQuery({
-    queryKey: ['Course Schedule', 'list', selectedYear, selectedGroup, isTeacher],
-    queryFn: listSchedules,
-  });
   const { data: courses = [] } = useQuery({
     queryKey: ['Course', 'list', isAdmin],
-    queryFn: listCourses,
+    queryFn: () => isAdmin
+      ? adminGetList('Course', [], ['name', 'course_name'], 100)
+      : getList('Course', [], ['name', 'course_name'], 100),
     staleTime: 2 * 60 * 1000,
   });
   const { data: groups = [] } = useQuery({
     queryKey: ['Student Group', 'list', isTeacher, teacherGroupNames.join(','), selectedYear, isAdmin],
-    queryFn: listGroups,
+    queryFn: () => isAdmin
+      ? adminGetList('Student Group', groupFilters, ['name', 'student_group_name'], 100)
+      : getList('Student Group', groupFilters, ['name', 'student_group_name'], 100),
     staleTime: 2 * 60 * 1000,
   });
   const { data: instructors = [] } = useQuery({
     queryKey: ['Instructor', 'list', isAdmin],
-    queryFn: listInstructors,
+    queryFn: () => isAdmin
+      ? adminGetList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100)
+      : getList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100),
     staleTime: 2 * 60 * 1000,
   });
 
-  // Default to first group to avoid messy "All Classes" view
+  const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm({
+    resolver: zodResolver(slotSchema),
+    defaultValues: {
+      section_id: '',
+      subject_id: '',
+      instructor_id: '',
+      day_of_week: 0,
+      period_no: 1,
+    },
+  });
+
+  const watchedDay = watch('day_of_week');
+
   useEffect(() => {
     if (!isTeacher && groups.length > 0 && !selectedGroup) {
       setSelectedGroup(groups[0].name);
     }
   }, [groups, isTeacher, selectedGroup]);
 
-  const createMutation = useFrappeCreate('Course Schedule', {
-    onSuccess: () => { setShowModal(false); setEditing(null); },
-  });
-  const updateMutation = useFrappeUpdate('Course Schedule', {
-    onSuccess: () => { setShowModal(false); setEditing(null); },
-  });
-  const deleteMutation = useFrappeDelete('Course Schedule');
-
-  const saving = createMutation.isPending || updateMutation.isPending;
-
   const yearGroupNames = groups.map(g => g.name);
   const filteredSchedules = selectedGroup
-    ? schedules.filter(s => s.student_group === selectedGroup)
+    ? slots.data.filter(s => s.section_id === selectedGroup)
     : isTeacher
-      ? schedules
+      ? slots.data
       : selectedYear
-        ? schedules.filter(s => yearGroupNames.includes(s.student_group))
-        : schedules;
+        ? slots.data.filter(s => yearGroupNames.includes(s.section_id))
+        : slots.data;
 
-  // Build timetable grid
   const grid = useMemo(() => {
     const g = {};
-    DAYS.forEach(d => { g[d] = {}; PERIODS.forEach(p => { g[d][p] = []; }); });
-    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const normalizeTime = (t) => {
-      if (!t) return null;
-      const [h, m] = t.split(':');
-      return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
-    };
+    DAYS.forEach(d => { g[d] = {}; PERIODS.forEach(p => { g[d][p.no] = []; }); });
     filteredSchedules.forEach(s => {
-      const day = s.day_of_week || (s.schedule_date ? dayNames[new Date(s.schedule_date).getDay()] : null);
-      const hour = normalizeTime(s.from_time);
-      if (g[day] && hour && g[day][hour] !== undefined) {
-        g[day][hour].push(s);
+      const day = DAYS[s.day_of_week];
+      if (g[day] && s.period_no && g[day][s.period_no] !== undefined) {
+        g[day][s.period_no].push(s);
       }
     });
     return g;
   }, [filteredSchedules]);
 
-  // Stats
   const totalSlots = filteredSchedules.length;
-  const uniqueCourses = new Set(filteredSchedules.map(s => s.course)).size;
+  const uniqueCourses = new Set(filteredSchedules.map(s => s.subject_name)).size;
   const uniqueTeachers = new Set(filteredSchedules.map(s => s.instructor_name)).size;
 
   const { day: currentDay, hour: currentHour } = getCurrentDayAndTime();
+  const currentPeriodNo = PERIODS.find(p => p.time === currentHour)?.no || null;
 
   const openAdd = () => {
-    setEditing(null);
-    setForm({ ...emptyForm, student_group: teacherGroupNames.length === 1 ? teacherGroupNames[0] : '' });
+    setEditingId(null);
+    reset({
+      section_id: teacherGroupNames.length === 1 ? teacherGroupNames[0] : '',
+      subject_id: '',
+      instructor_id: '',
+      day_of_week: 0,
+      period_no: 1,
+    });
     setShowModal(true);
   };
-  const openEdit = async (sch) => {
-    try {
-      const doc = isAdmin
-        ? await adminCallMethod('frappe.client.get', { doctype: 'Course Schedule', name: sch.name })
-        : await getDoc('Course Schedule', sch.name);
-      setEditing(doc);
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const derivedDay = doc.schedule_date ? dayNames[new Date(doc.schedule_date).getDay()] : 'Monday';
-      const normalizeTime = (t) => {
-        if (!t) return null;
-        const [h, m] = t.split(':');
-        return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
-      };
-      setForm({
-        course: doc.course || '',
-        student_group: doc.student_group || '',
-        instructor: doc.instructor || '',
-        room: doc.room || '',
-        day_of_week: doc.day_of_week || derivedDay,
-        from_time: (normalizeTime(doc.from_time) || '08:00') + ':00',
-        to_time: (normalizeTime(doc.to_time) || '09:00') + ':00',
-      });
-      setShowModal(true);
-    } catch (err) { console.error(err); }
+
+  const openEdit = (slot) => {
+    setEditingId(slot.id);
+    reset({
+      section_id: slot.section_id,
+      subject_id: slot.subject_id,
+      instructor_id: slot.instructor_id,
+      day_of_week: slot.day_of_week,
+      period_no: slot.period_no,
+    });
+    setShowModal(true);
   };
 
-  const handleSave = (e) => {
-    e.preventDefault();
-    if (!form.instructor) return;
-    const selectedInstructor = instructors.find(i => i.name === form.instructor);
-    const payload = {
-      ...form,
-      instructor_name: selectedInstructor?.instructor_name || form.instructor,
-      from_time: form.from_time.length === 5 ? form.from_time + ':00' : form.from_time,
-      to_time: form.to_time.length === 5 ? form.to_time + ':00' : form.to_time,
-    };
-    if (editing) {
-      updateMutation.mutate({ name: editing.name, data: payload });
+  const onSubmit = (data) => {
+    if (editingId) {
+      update.mutate({ id: editingId, data });
     } else {
-      createMutation.mutate(payload);
+      create.mutate({ ...data, academic_year_id: selectedYear });
     }
+    setShowModal(false);
+    setEditingId(null);
   };
 
-  const handleDelete = (sch) => {
+  const handleDelete = (slot) => {
     if (!window.confirm(`Delete this schedule entry?`)) return;
-    deleteMutation.mutate(sch.name);
+    remove.mutate(slot.id);
   };
-
-  const handleChange = (e) => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
 
   const courseName = (id) => courses.find(c => c.name === id)?.course_name || id;
   const groupName = (id) => groups.find(g => g.name === id)?.student_group_name || id;
 
-  // Count periods per day
   const dayPeriodCounts = useMemo(() => {
     const counts = {};
     DAYS.forEach(d => {
-      counts[d] = PERIODS.reduce((sum, p) => sum + (grid[d][p]?.length || 0), 0);
+      counts[d] = PERIODS.reduce((sum, p) => sum + (grid[d][p.no]?.length || 0), 0);
     });
     return counts;
   }, [grid]);
 
-  if (loading) {
+  if (slots.isLoading) {
     return (
       <div className="space-y-6 animate-fade">
         <div>
@@ -302,7 +246,6 @@ export default function Timetable() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-4 animate-in">
         <div>
           <div className="eyebrow">Academics</div>
@@ -332,7 +275,6 @@ export default function Timetable() {
         </div>
       </div>
 
-      {/* Stats Row */}
       <div className="grid grid-cols-3 gap-4 animate-in" style={{ animationDelay: '60ms' }}>
         <div className="stat-card flex items-center gap-4 group cursor-default">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[#2ED05D] to-[#90EEB0] flex items-center justify-center shrink-0 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3">
@@ -369,7 +311,6 @@ export default function Timetable() {
         </div>
       </div>
 
-      {/* Timetable Grid — Bento Day Columns */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 animate-in" style={{ animationDelay: '120ms' }}>
         {DAYS.map((day, dayIdx) => {
           const theme = DAY_THEMES[day];
@@ -377,28 +318,18 @@ export default function Timetable() {
           const periodCount = dayPeriodCounts[day];
 
           return (
-            <div
-              key={day}
-              className={`rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-1 ${
-                isToday ? 'ring-2 ring-[var(--color-primary)] ring-offset-2' : ''
-              }`}
+            <div key={day} className={`rounded-2xl overflow-hidden transition-all duration-300 hover:-translate-y-1 ${isToday ? 'ring-2 ring-[var(--color-primary)] ring-offset-2' : ''}`}
               style={{
                 background: theme.bg,
-                boxShadow: isToday
-                  ? `0 8px 30px ${theme.accent}30, 0 0 0 1px ${theme.border}`
-                  : `0 4px 16px ${theme.accent}15, 0 0 0 1px ${theme.border}`,
+                boxShadow: isToday ? `0 8px 30px ${theme.accent}30, 0 0 0 1px ${theme.border}` : `0 4px 16px ${theme.accent}15, 0 0 0 1px ${theme.border}`,
               }}
             >
-              {/* Day Header */}
-              <div
-                className="px-4 py-3 flex items-center justify-between"
+              <div className="px-4 py-3 flex items-center justify-between"
                 style={{ background: `linear-gradient(135deg, ${theme.accent}20, ${theme.accent}08)` }}
               >
                 <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold transition-transform duration-300 hover:scale-110"
-                    style={{ background: theme.accent, color: '#fff' }}
-                  >
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center text-sm font-bold transition-transform duration-300 hover:scale-110"
+                    style={{ background: theme.accent, color: '#fff' }}>
                     {theme.emoji}
                   </div>
                   <div>
@@ -412,112 +343,85 @@ export default function Timetable() {
                   </div>
                 </div>
                 {periodCount > 0 && (
-                  <span
-                    className="text-xs font-bold px-2 py-1 rounded-lg"
-                    style={{ background: `${theme.accent}20`, color: theme.label }}
-                  >
+                  <span className="text-xs font-bold px-2 py-1 rounded-lg"
+                    style={{ background: `${theme.accent}20`, color: theme.label }}>
                     {periodCount}
                   </span>
                 )}
               </div>
 
-              {/* Period Cards */}
               <div className="p-2 space-y-2 min-h-[320px]">
                 {PERIODS.map((period) => {
-                  const slots = grid[day][period] || [];
-                  const isCurrentSlot = isToday && period === currentHour;
+                  const slotsInPeriod = grid[day][period.no] || [];
+                  const isCurrentSlot = isToday && currentPeriodNo === period.no;
 
-                  if (slots.length === 0) {
+                  if (slotsInPeriod.length === 0) {
                     return isCurrentSlot ? (
-                      <div key={period} className="relative px-2 py-1.5 rounded-xl border-2 border-dashed opacity-60"
+                      <div key={period.no} className="relative px-2 py-1.5 rounded-xl border-2 border-dashed opacity-60"
                         style={{ borderColor: theme.accent + '40' }}>
                         <div className="flex items-center gap-1.5">
                           <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: theme.accent }} />
                           <span className="text-[10px] font-semibold" style={{ color: theme.label }}>
-                            {formatTime(period)}
+                            {formatTime(period.time)}
                           </span>
-                          <span className="text-[10px] text-[var(--color-text-muted)]">— Free</span>
+                          <span className="text-[10px] text-[var(--color-text-muted)]">Free</span>
                         </div>
                       </div>
                     ) : null;
                   }
 
-                  return slots.map((slot, slotIdx) => {
-                    const color = getSlotColor(slot.course);
-                    const isHovered = hoveredSlot === slot.name;
-                    const globalIdx = dayIdx * 10 + PERIODS.indexOf(period) * 3 + slotIdx;
+                  return slotsInPeriod.map((slot, slotIdx) => {
+                    const color = getSlotColor(slot.subject_name);
+                    const isHovered = hoveredSlot === slot.id;
+                    const globalIdx = dayIdx * 10 + period.no * 3 + slotIdx;
 
                     return (
-                      <div
-                        key={slot.name}
-                        className={`rounded-xl p-2.5 transition-all duration-200 relative group ${
-                          canEdit ? 'cursor-pointer active:scale-[0.97]' : ''
-                        } ${isCurrentSlot ? 'ring-2 ring-white ring-offset-1' : ''}`}
+                      <div key={slot.id} className={`rounded-xl p-2.5 transition-all duration-200 relative group ${canEdit ? 'cursor-pointer active:scale-[0.97]' : ''} ${isCurrentSlot ? 'ring-2 ring-white ring-offset-1' : ''}`}
                         style={{
                           background: `linear-gradient(135deg, ${color.bg}, ${color.bg}dd)`,
                           color: color.text,
-                          boxShadow: isHovered
-                            ? `0 8px 24px ${color.bg}50, inset 0 1px 0 rgba(255,255,255,0.3)`
-                            : `0 2px 8px ${color.bg}30, inset 0 1px 0 rgba(255,255,255,0.2)`,
+                          boxShadow: isHovered ? `0 8px 24px ${color.bg}50, inset 0 1px 0 rgba(255,255,255,0.3)` : `0 2px 8px ${color.bg}30, inset 0 1px 0 rgba(255,255,255,0.2)`,
                           animationDelay: `${globalIdx * 30}ms`,
                           opacity: 0,
                           animation: `fadeInUp 0.3s var(--ease-out) ${globalIdx * 30}ms forwards`,
                         }}
                         onClick={() => canEdit && openEdit(slot)}
-                        onMouseEnter={() => setHoveredSlot(slot.name)}
+                        onMouseEnter={() => setHoveredSlot(slot.id)}
                         onMouseLeave={() => setHoveredSlot(null)}
                       >
-                        {/* Time badge */}
                         <div className="flex items-center justify-between mb-1.5">
                           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-white/25">
-                            {formatTime(slot.from_time)}
+                            P{slot.period_no} · {formatTime(period.time)}
                           </span>
                           {isCurrentSlot && (
                             <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                           )}
                         </div>
 
-                        {/* Class name (important for teachers so they know where to go) */}
                         {isTeacher && (
                           <div className="mb-1">
                             <span className="text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-black/15 text-white/90 truncate max-w-full inline-block">
-                              {groupName(slot.student_group)}
+                              {groupName(slot.section_id)}
                             </span>
                           </div>
                         )}
 
-                        {/* Course name */}
                         <p className="text-xs font-bold leading-snug truncate mb-1">
-                          {courseName(slot.course)}
+                          {slot.subject_name || courseName(slot.subject_id)}
                         </p>
 
-                        {/* Instructor */}
                         {(slot.instructor_name || slot.instructor_id) && (
                           <p className="text-[10px] opacity-75 truncate flex items-center gap-1">
                             <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            {slot.instructor_name || instructors.find(i => i.name === slot.instructor_id)?.instructor_name || slot.instructor_id}
+                            {slot.instructor_name}
                           </p>
                         )}
 
-                        {/* Room */}
-                        {slot.room && (
-                          <p className="text-[10px] opacity-75 truncate flex items-center gap-1 mt-0.5">
-                            <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                            </svg>
-                            {slot.room}
-                          </p>
-                        )}
-
-                        {/* Delete button */}
                         {canEdit && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleDelete(slot); }}
-                            className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 w-5 h-5 bg-white/30 backdrop-blur-sm rounded-lg hover:bg-white/50 flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95"
-                          >
+                          <button onClick={(e) => { e.stopPropagation(); handleDelete(slot); }}
+                            className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 w-5 h-5 bg-white/30 backdrop-blur-sm rounded-lg hover:bg-white/50 flex items-center justify-center transition-all duration-200 hover:scale-110 active:scale-95">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
                             </svg>
@@ -528,8 +432,7 @@ export default function Timetable() {
                   });
                 })}
 
-                {/* Empty state for day */}
-                {PERIODS.every(p => (grid[day][p] || []).length === 0) && (
+                {PERIODS.every(p => (grid[day][p.no] || []).length === 0) && (
                   <div className="flex flex-col items-center justify-center py-8 opacity-50">
                     <svg className="w-8 h-8 mb-2" style={{ color: theme.accent }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 12H4" />
@@ -543,46 +446,37 @@ export default function Timetable() {
         })}
       </div>
 
-      {/* Period Time Legend */}
       <div className="card p-4 animate-in" style={{ animationDelay: '180ms' }}>
         <h3 className="text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-wider mb-3">Period Schedule</h3>
         <div className="flex flex-wrap gap-2">
-          {PERIODS.map((period, i) => {
-            const isNow = period === currentHour && currentDay !== 'Sunday';
+          {PERIODS.map((period) => {
+            const isNow = period.time === currentHour && currentDay !== 'Sunday';
             return (
-              <div
-                key={period}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${
-                  isNow ? 'bg-[var(--color-primary)] text-white shadow-md' : 'bg-gray-50 text-[var(--color-text-secondary)] hover:bg-gray-100'
-                }`}
-              >
+              <div key={period.no} className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all duration-200 ${isNow ? 'bg-[var(--color-primary)] text-white shadow-md' : 'bg-gray-50 text-[var(--color-text-secondary)] hover:bg-gray-100'}`}>
                 <span className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center text-[10px] font-bold">
-                  {i + 1}
+                  {period.no}
                 </span>
-                {formatTime(period)}
+                {formatTime(period.time)}
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Add/Edit Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade">
-          <div
-            className="bg-white rounded-3xl w-full max-w-md overflow-hidden"
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden"
             style={{
               boxShadow: '0 25px 80px rgba(0,0,0,0.15), 0 0 0 1px rgba(46,208,93,0.12)',
               animation: 'scaleIn 0.25s var(--ease-spring) forwards',
             }}
           >
-            {/* Modal Header with gradient */}
             <div className="px-6 pt-6 pb-4 bg-gradient-to-br from-[var(--color-primary-light)] to-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary-hover)] flex items-center justify-center">
                     <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      {editing ? (
+                      {editingId ? (
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                       ) : (
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -590,14 +484,12 @@ export default function Timetable() {
                     </svg>
                   </div>
                   <div>
-                    <h2 className="text-lg font-bold text-[var(--color-text)]">{editing ? 'Edit Period' : 'Add Period'}</h2>
-                    <p className="text-xs text-[var(--color-text-secondary)]">{editing ? 'Update schedule details' : 'Add a new class to the timetable'}</p>
+                    <h2 className="text-lg font-bold text-[var(--color-text)]">{editingId ? 'Edit Period' : 'Add Period'}</h2>
+                    <p className="text-xs text-[var(--color-text-secondary)]">{editingId ? 'Update schedule details' : 'Add a new class to the timetable'}</p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="w-8 h-8 rounded-xl bg-black/5 flex items-center justify-center hover:bg-black/10 transition-all duration-200 hover:scale-110 active:scale-95 btn-press"
-                >
+                <button onClick={() => { setShowModal(false); setEditingId(null); }}
+                  className="w-8 h-8 rounded-xl bg-black/5 flex items-center justify-center hover:bg-black/10 transition-all duration-200 hover:scale-110 active:scale-95 btn-press">
                   <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -605,14 +497,14 @@ export default function Timetable() {
               </div>
             </div>
 
-            {/* Modal Body */}
-            <form onSubmit={handleSave} className="px-6 py-5 space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="px-6 py-5 space-y-4">
               <div>
-                <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Subject / Course</label>
-                <select name="course" value={form.course} onChange={handleChange} className="input">
-                  <option value="">— Select Subject —</option>
+                <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Subject</label>
+                <select {...register('subject_id')} className="input">
+                  <option value="">Select Subject</option>
                   {courses.map(c => <option key={c.name} value={c.name}>{c.course_name || c.name}</option>)}
                 </select>
+                {errors.subject_id && <p className="text-xs text-red-500 mt-1">{errors.subject_id.message}</p>}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Class</label>
@@ -621,65 +513,58 @@ export default function Timetable() {
                     {teacherGroupNames[0]}
                   </div>
                 ) : (
-                  <select name="student_group" value={form.student_group} onChange={handleChange} className="input">
-                    <option value="">— Select Class —</option>
+                  <select {...register('section_id')} className="input">
+                    <option value="">Select Class</option>
                     {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
                   </select>
                 )}
+                {errors.section_id && <p className="text-xs text-red-500 mt-1">{errors.section_id.message}</p>}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">
                   Teacher <span className="text-[var(--color-danger)]">*</span>
                 </label>
-                <select name="instructor" value={form.instructor} onChange={handleChange} className="input" required>
-                  <option value="">— Select Teacher —</option>
+                <select {...register('instructor_id')} className="input">
+                  <option value="">Select Teacher</option>
                   {instructors.map(i => <option key={i.name} value={i.name}>{i.instructor_name || i.name}</option>)}
                 </select>
+                {errors.instructor_id && <p className="text-xs text-red-500 mt-1">{errors.instructor_id.message}</p>}
               </div>
               <div>
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Day</label>
                 <div className="grid grid-cols-6 gap-1.5">
-                  {DAYS.map(d => {
+                  {DAYS.map((d, idx) => {
                     const theme = DAY_THEMES[d];
-                    const isSelected = form.day_of_week === d;
+                    const isSelected = watchedDay === idx;
                     return (
-                      <button
-                        key={d}
-                        type="button"
-                        onClick={() => setForm(p => ({ ...p, day_of_week: d }))}
+                      <button key={d} type="button" onClick={() => setValue('day_of_week', idx)}
                         className="py-2 rounded-xl text-xs font-bold transition-all duration-200 btn-press"
                         style={{
                           background: isSelected ? theme.accent : theme.bg,
                           color: isSelected ? '#fff' : theme.label,
                           boxShadow: isSelected ? `0 4px 12px ${theme.accent}40` : 'none',
                           border: `2px solid ${isSelected ? theme.accent : theme.border}`,
-                        }}
-                      >
+                        }}>
                         {theme.emoji}
                       </button>
                     );
                   })}
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">From</label>
-                  <input type="time" name="from_time" value={form.from_time?.substring(0, 5)} onChange={handleChange} className="input" />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">To</label>
-                  <input type="time" name="to_time" value={form.to_time?.substring(0, 5)} onChange={handleChange} className="input" />
-                </div>
-              </div>
               <div>
-                <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Room</label>
-                <input name="room" value={form.room} onChange={handleChange} className="input" placeholder="e.g. Room 101" />
+                <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Period</label>
+                <select {...register('period_no', { valueAsNumber: true })} className="input">
+                  {PERIODS.map(p => (
+                    <option key={p.no} value={p.no}>Period {p.no} ({formatTime(p.time)} &ndash; {formatTime(PERIODS[p.no]?.time || '17:00')})</option>
+                  ))}
+                </select>
+                {errors.period_no && <p className="text-xs text-red-500 mt-1">{errors.period_no.message}</p>}
               </div>
               <div className="flex justify-end gap-3 pt-3">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary btn-press">Cancel</button>
+                <button type="button" onClick={() => { setShowModal(false); setEditingId(null); }} className="btn-secondary btn-press">Cancel</button>
                 <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2 disabled:opacity-50 btn-press">
                   {saving && <span className="w-4 h-4 flex items-center justify-center"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /></span>}
-                  {editing ? 'Update' : 'Add Period'}
+                  {editingId ? 'Update' : 'Add Period'}
                 </button>
               </div>
             </form>

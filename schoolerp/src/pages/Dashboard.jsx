@@ -92,13 +92,25 @@ const fetchAdminData = async ({ yearStartDate, yearEndDate } = {}) => {
 
   const today = new Date().toISOString().split('T')[0];
 
-  const [programs, courses, students, instructors, attendanceList, todaySchedules] = await Promise.all([
+  const [programs, courses, students, instructors, attendanceList, todaySlots] = await Promise.all([
     getList('Program', [], ['name'], 100),
     getList('Course', [], ['name'], 100),
     getList('Student', [['enabled', '=', 1]], ['name', 'student_name', 'first_name', 'creation', 'student_group_name'], 500),
     getList('Instructor', [], ['name'], 100),
     getList('Student Attendance', attFilters, ['name', 'status', 'date', 'creation', 'student_group'], 500),
-    getList('Course Schedule', [['schedule_date', '=', today]], ['course', 'instructor_name', 'from_time', 'to_time', 'room', 'student_group'], 50).catch(() => []),
+    client.get('/timetable/slots').then(res => {
+      let items = res.data;
+      if (!Array.isArray(items)) items = items.data || items.results || [];
+      return items.map(s => ({
+        name: s.id,
+        course: s.subject_name || s.subject_id || '',
+        instructor_name: s.instructor_name || '',
+        from_time: s.period_no ? `${String(s.period_no + 7).padStart(2, '0')}:00:00` : '',
+        to_time: s.period_no ? `${String(s.period_no + 8).padStart(2, '0')}:00:00` : '',
+        room: '',
+        student_group: s.section_id || '',
+      }));
+    }).catch(() => []),
   ]);
 
   const stats = {
@@ -194,7 +206,16 @@ export default function Dashboard() {
     queryFn: async () => {
       const [hwResult, slotsResult, attResult, feeResult] = await Promise.allSettled([
         getList('Homework Assignment', { limit: 10 }),
-        getList('Course Schedule', { limit: 20 }),
+        client.get('/timetable/slots').then(r => {
+          let items = r.data;
+          if (!Array.isArray(items)) items = items.data || items.results || [];
+          return items.map(s => ({
+            name: s.id,
+            day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][s.day_of_week] || '',
+            from_time: s.period_no ? `${String(s.period_no + 7).padStart(2, '0')}:00:00` : '',
+            subject: s.subject_name || '',
+          }));
+        }),
         getList('Student Attendance', { limit: 30 }),
         getList('Fees', { limit: 10 }),
       ]);

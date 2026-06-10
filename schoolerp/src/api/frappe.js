@@ -122,8 +122,7 @@ const DOC_ENDPOINTS = {
   'Student':                 { list: '/academic/students',         single: '/academic/students/{name}',       method: null },
   'Instructor':              { list: '/academic/instructors',      single: '/academic/instructors/{name}',    method: null },
   'User':                    { list: '/auth/users',                single: '/auth/users/{name}',              method: null },
-  'Course Schedule':         { list: '/timetable/slots',           single: '/timetable/slots/{name}',         method: null },
-    'Homework Assignment':     { list: '/homework',                   single: '/homework/{name}',                 method: null },
+  'Homework Assignment':     { list: '/homework',                   single: '/homework/{name}',                 method: null },
   'Fee Structure':           { list: '/fees/structures',           single: '/fees/structures/{name}',         method: null },
   'Fee Category':            { list: '/fees/heads',                single: '/fees/heads/{name}',              method: null },
   'Fees':                    { list: '/fees/invoices',             single: '/fees/invoices/{name}',           method: null },
@@ -626,68 +625,7 @@ const HANDLERS = {
     },
   },
 
-  // ── Course Schedule → Timetable ──
-  'Course Schedule': {
-    async list(filters, fields, pageLength, pageStart) {
-      const url = urlFor('Course Schedule', 'list');
-      let items = await fetchList('Course Schedule', url, filters, ['id', 'section_id', 'subject_id', 'teacher_id', 'day_of_week', 'period_no', 'academic_year_id', 'is_published', ...(fields || [])], pageLength, pageStart);
-      return items.map(s => {
-        const hour = s.period_no + 7;
-        const from_time = `${String(hour).padStart(2, '0')}:00:00`;
-        const to_time = `${String(hour + 1).padStart(2, '0')}:00:00`;
-        return {
-          name: s.id || s.name,
-          course: s.subject_id || '',
-          section: s.section_id || '',
-          student_group: s.section_id || '',
-          day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][s.day_of_week] || '',
-          day_of_week: s.day_of_week,
-          period_no: s.period_no,
-          from_time: s.start_time || from_time,
-          to_time: s.end_time || to_time,
-          room: s.room || '',
-          ...pick(s, fields),
-        };
-      });
-    },
-    async get(name) {
-      const url = urlFor('Course Schedule', 'single', name);
-      return fetchDoc('Course Schedule', url, name);
-    },
-    async create(data) {
-      const dayMap = { 'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6 };
-      const d = data.day_of_week || data.day;
-      const dayNum = typeof d === 'string' ? dayMap[d] : (d ?? 0);
-      const periodNum = data.period_no || data.period || (data.from_time ? Math.max(1, parseInt(data.from_time.split(':')[0], 10) - 7) : 1);
-      const res = await client.post('/timetable/slots', {
-        section_id: data.student_group || '',
-        subject_id: data.course || '',
-        teacher_id: data.instructor || '',
-        day_of_week: dayNum,
-        period_no: periodNum,
-        academic_year_id: data.academic_year || '754e7fc0-2e8a-4b5b-9732-496d47de3138',
-      });
-      return { name: res.data.id || `slot-${Date.now()}`, ...data };
-    },
-    async update(name, data) {
-      const dayMap = { 'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6 };
-      const d = data.day_of_week || data.day;
-      const dayNum = typeof d === 'string' ? dayMap[d] : (d ?? 0);
-      const periodNum = data.period_no || data.period || (data.from_time ? Math.max(1, parseInt(data.from_time.split(':')[0], 10) - 7) : 1);
-      const res = await client.patch(`/timetable/slots/${name}`, {
-        section_id: data.student_group || '',
-        subject_id: data.course || '',
-        teacher_id: data.instructor || '',
-        day_of_week: dayNum,
-        period_no: periodNum,
-        academic_year_id: data.academic_year || '754e7fc0-2e8a-4b5b-9732-496d47de3138',
-      });
-      return { name, ...data };
-    },
-    async delete(name) {
-      await client.delete(`/timetable/slots/${name}`);
-    },
-  },
+  // REMOVED: 'Course Schedule' → use api/timetable.js directly
 
   // ── Fee Structure ──
   'Fee Structure': {
@@ -1947,10 +1885,20 @@ export async function applyParentChildLeave(childId, data) {
 export async function getParentChildSchedule(childId) {
   try {
     const student = await HANDLERS['Student'].get(childId);
-    const group = student.student_group;
-    if (!group) return [];
-    const schedule = await HANDLERS['Course Schedule'].list([['section_id', '=', group]]);
-    return schedule;
+    const sectionName = student.student_group || student.section_name || '';
+    if (!sectionName) return [];
+    const res = await client.get('/timetable/slots', { params: { section_id: sectionName } });
+    let items = res.data;
+    if (!Array.isArray(items)) items = items.data || items.results || [];
+    return items.map(s => ({
+      id: s.id,
+      name: s.id,
+      course: s.subject_name || s.subject_id || '',
+      instructor: s.instructor_name || s.instructor_id || '',
+      instructor_name: s.instructor_name || '',
+      day_of_week: s.day_of_week,
+      subject_name: s.subject_name || '',
+    }));
   } catch { return []; }
 }
 
