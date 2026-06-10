@@ -145,13 +145,14 @@ export default function Timetable() {
   }, [groups, isTeacher, selectedGroup]);
 
   const yearGroupNames = groups.map(g => g.name);
+  const slotList = slots.data || [];
   const filteredSchedules = selectedGroup
-    ? slots.data.filter(s => s.section_id === selectedGroup)
+    ? slotList.filter(s => s.section_id === selectedGroup)
     : isTeacher
-      ? slots.data
+      ? slotList
       : selectedYear
-        ? slots.data.filter(s => yearGroupNames.includes(s.section_id))
-        : slots.data;
+        ? slotList.filter(s => yearGroupNames.includes(s.section_id))
+        : slotList;
 
   const grid = useMemo(() => {
     const g = {};

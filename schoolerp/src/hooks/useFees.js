@@ -174,27 +174,6 @@ export function usePayments(filters = [], options = {}) {
   });
 }
 
-export function useRecordPayment() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (data) => {
-      const { fee_invoice, fee_amount, ...paymentData } = data;
-      const doc = await createDoc('Payment Entry', paymentData);
-      if (doc?.name) {
-        await callMethod('run_doc_method', { dt: 'Payment Entry', dn: doc.name, method: 'submit' });
-      }
-      // Note: ERPNext doesn't support Fees as reference_doctype in Payment Entry
-      // and outstanding_amount on submitted Fees can't be updated via API.
-      // Frontend computes effective outstanding by subtracting submitted payments.
-      return doc;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['Payment Entry'] });
-      qc.invalidateQueries({ queryKey: ['Fees'] });
-    },
-  });
-}
-
 // ── Student Fee Ledger ──────────────────────────────────────────────────────
 
 export function useStudentFees(studentId, options = {}) {

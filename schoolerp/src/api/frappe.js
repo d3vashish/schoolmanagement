@@ -652,7 +652,6 @@ const HANDLERS = {
         fee_head_id: data.fee_head_id || '',
         academic_year_id: data.academic_year || '',
         amount: data.amount || 0,
-        name: data.name || '',
       });
       return { name: res.data.id || `FS-${Date.now()}`, ...data };
     },
