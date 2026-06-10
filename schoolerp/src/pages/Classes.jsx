@@ -1,124 +1,475 @@
-import { useState } from 'react';
-import { useSettings } from '../context/SettingsContext';
-import { useAuth } from '../context/AuthContext';
-import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, getDoc } from '../api/frappe';
-import { useFrappeList, useFrappeCreate, useFrappeUpdate, useFrappeDelete } from '../hooks/useFrappeQuery';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { client } from '../api/frappe';
+import { useAuth } from '../context/AuthContext';
+import {
+  useClasses, useClassDetail, useClassSubjects,
+  useLinkSubject, useUnlinkSubject,
+  useTeacherAssignments, useCreateTeacherAssignment, useDeleteTeacherAssignment,
+  useInstructors,
+} from '../hooks/useClasses';
+import { useSubjects } from '../hooks/useSubjects';
 
-// 1:1 validation: check if a teacher is already assigned to another class
-const validateOneToOne = async (teacherEmail, currentGroupName) => {
-  if (!teacherEmail) return null;
-  const existing = await getList(
-    'Student Group',
-    [['class_teacher', '=', teacherEmail]],
-    ['name', 'student_group_name'],
-    1
-  );
-  if (existing.length > 0 && existing[0].name !== currentGroupName) {
-    return existing[0].student_group_name || existing[0].name;
-  }
-  return null;
-};
+const chipColors = [
+  { bg: '#dbeafe', text: '#1d4ed8' },
+  { bg: '#d1fae5', text: '#047857' },
+  { bg: '#ede9fe', text: '#7c3aed' },
+  { bg: '#fef3c7', text: '#b45309' },
+  { bg: '#fce7f3', text: '#be185d' },
+  { bg: '#cffafe', text: '#0e7490' },
+  { bg: '#fde68a', text: '#92400e' },
+  { bg: '#e0e7ff', text: '#4338ca' },
+];
 
-export default function Classes() {
-  const settings = useSettings();
-  const { user } = useAuth();
-  const { selectedYear, isCurrentYear, yearGroups, yearPrograms } = useAcademicYear();
-  const isTeacher = user?.roles?.includes('Instructor');
-  const emptyForm = {
-    student_group_name: '',
-    program: '',
-    academic_year: selectedYear || settings?.academic_year || '',
-    academic_term: '',
-    max_strength: '',
-    group_based_on: 'Batch',
-    class_teacher: '',
-  };
+/* ── Subject Chips for a single class ─────────────────────────────────── */
+function ClassSubjectChips({ classId, canEdit, allSubjects }) {
+  const { data: linked = [], isLoading } = useClassSubjects(classId);
+  const linkMutation = useLinkSubject();
+  const unlinkMutation = useUnlinkSubject();
 
-  const [search, setSearch]         = useState('');
-  const [showModal, setShowModal]   = useState(false);
-  const [editing, setEditing]       = useState(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(null);
-  const [form, setForm]             = useState(emptyForm);
+  const [showAdd, setShowAdd] = useState(false);
+  const [search, setSearch] = useState('');
+  const dropRef = useRef(null);
 
-  // Use shared year-scoped data from context
-  const classes = yearGroups;
-  const programs = yearPrograms;
-  const loading = false; // yearGroups is already loaded by context
-  const { data: users = [] } = useFrappeList('User', [['enabled', '=', 1]], ['name', 'full_name', 'email'], 200);
-
-  const createMutation = useFrappeCreate('Student Group', {
-    onSuccess: () => { setShowModal(false); setEditing(null); },
-  });
-  const updateMutation = useFrappeUpdate('Student Group', {
-    onSuccess: () => { setShowModal(false); setEditing(null); },
-  });
-  const deleteMutation = useFrappeDelete('Student Group', {
-    onSuccess: () => setDeleteConfirm(null),
-  });
-
-  const saving = createMutation.isPending || updateMutation.isPending;
-
-  const filtered = classes.filter(c => {
-    if (isTeacher && c.class_teacher !== user.name) return false;
-    return c.student_group_name?.toLowerCase().includes(search.toLowerCase()) ||
-      c.program?.toLowerCase().includes(search.toLowerCase());
-  });
-
-  const openAdd = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
-  const openEdit = async (cls) => {
-    try {
-      const doc = await getDoc('Student Group', cls.name);
-      setEditing(doc);
-      setForm({
-        student_group_name: doc.student_group_name || '',
-        program: doc.program || '',
-        academic_year: doc.academic_year || settings?.academic_year || '',
-        academic_term: doc.academic_term || '',
-        max_strength: doc.max_strength || '',
-        group_based_on: doc.group_based_on || 'Batch',
-        class_teacher: doc.class_teacher || '',
-      });
-      setShowModal(true);
-    } catch (err) { console.error(err); }
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    if (!form.student_group_name) return;
-
-    // 1:1 validation
-    if (form.class_teacher) {
-      const existingClass = await validateOneToOne(form.class_teacher, editing?.name);
-      if (existingClass) {
-        alert(`This teacher is already assigned as class teacher of "${existingClass}". One teacher can only be assigned to one class.`);
-        return;
+  useEffect(() => {
+    const handler = (e) => {
+      if (dropRef.current && !dropRef.current.contains(e.target)) {
+        setShowAdd(false);
+        setSearch('');
       }
-    }
-
-    const payload = {
-      student_group_name: form.student_group_name,
-      program: form.program,
-      academic_year: form.academic_year,
-      academic_term: form.academic_term,
-      max_strength: form.max_strength ? parseInt(form.max_strength) : undefined,
-      group_based_on: form.group_based_on,
-      class_teacher: form.class_teacher || '',
     };
-    if (editing) {
-      updateMutation.mutate({ name: editing.name, data: payload });
-    } else {
-      createMutation.mutate(payload);
-    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const linkedIds = new Set(linked.map(s => s.subject_id));
+  const available = allSubjects.filter(s => !linkedIds.has(s.id));
+  const filtered = available.filter(s =>
+    s.name?.toLowerCase().includes(search.toLowerCase()) ||
+    s.code?.toLowerCase().includes(search.toLowerCase())
+  );
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-1">
+        <span className="w-3 h-3 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs text-[var(--color-text-secondary)]">Loading…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      {linked.map((s, i) => (
+        <span
+          key={s.subject_id}
+          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all duration-200"
+          style={{ backgroundColor: chipColors[i % chipColors.length].bg, color: chipColors[i % chipColors.length].text }}
+        >
+          {s.subject_name}
+          {canEdit && (
+            <button
+              onClick={() => unlinkMutation.mutate({ classId, subjectId: s.subject_id })}
+              disabled={unlinkMutation.isPending}
+              className="ml-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center hover:opacity-60 transition-opacity text-[10px] leading-none"
+              title={`Remove ${s.subject_name}`}
+            >
+              ×
+            </button>
+          )}
+        </span>
+      ))}
+
+      {linked.length === 0 && !canEdit && (
+        <span className="text-xs text-[var(--color-text-secondary)] italic">No subjects assigned</span>
+      )}
+
+      {canEdit && (
+        <div className="relative" ref={dropRef}>
+          <button
+            onClick={() => setShowAdd(v => !v)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border border-dashed border-gray-300 text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/5 transition-all duration-200"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            Add
+          </button>
+
+          {showAdd && (
+            <div className="absolute left-0 top-full mt-1 w-64 bg-white rounded-xl shadow-xl border border-gray-200 z-40 overflow-hidden">
+              <div className="p-2 border-b border-gray-100">
+                <input
+                  type="text"
+                  placeholder="Search subjects…"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]"
+                  autoFocus
+                />
+              </div>
+              <div className="max-h-48 overflow-y-auto">
+                {filtered.length === 0 ? (
+                  <p className="px-4 py-4 text-sm text-[var(--color-text-secondary)] text-center">
+                    {available.length === 0 ? 'All subjects linked ✓' : 'No match found'}
+                  </p>
+                ) : (
+                  filtered.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        linkMutation.mutate({ classId, subjectId: s.id });
+                        setShowAdd(false);
+                        setSearch('');
+                      }}
+                      disabled={linkMutation.isPending}
+                      className="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-primary)] opacity-40" />
+                      <span className="font-medium text-[var(--color-text)]">{s.name}</span>
+                      <span className="text-[var(--color-text-secondary)] text-xs ml-auto">{s.code}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Teacher Assignment Modal ─────────────────────────────────────────── */
+function TeacherModal({ cls, onClose }) {
+  const { data: detail, isLoading: loadingDetail } = useClassDetail(cls.id);
+  const { data: linked = [], isLoading: loadingSubjects } = useClassSubjects(cls.id);
+  const { data: assignments = [], isLoading: loadingAssignments } = useTeacherAssignments(cls.id);
+  const { data: instructors = [] } = useInstructors();
+  const createMutation = useCreateTeacherAssignment();
+  const deleteMutation = useDeleteTeacherAssignment();
+
+  const sections = detail?.sections ?? [];
+  const isLoading = loadingDetail || loadingSubjects || loadingAssignments;
+
+  // Build a lookup: `${sectionId}-${subjectId}` → assignment
+  const assignmentMap = {};
+  assignments.forEach(a => {
+    assignmentMap[`${a.section_id}-${a.subject_id}`] = a;
+  });
+
+  // Instructor lookup by id
+  const instructorMap = {};
+  instructors.forEach(t => {
+    instructorMap[t.id] = t;
+    instructorMap[t.user_id] = t;
+  });
+
+  const handleAssign = (sectionId, subjectId, instructorId) => {
+    if (!instructorId) return;
+    createMutation.mutate({
+      instructor_id: instructorId,
+      section_id: sectionId,
+      subject_id: subjectId,
+      class_id: cls.id,
+    });
   };
 
-  const handleDelete = () => {
-    if (!deleteConfirm) return;
-    deleteMutation.mutate(deleteConfirm.name);
+  const handleRemove = (assignmentId) => {
+    deleteMutation.mutate({ assignmentId, classId: cls.id });
   };
 
-  const handleChange = (e) => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-xl font-bold text-[var(--color-text)]">
+              Class {cls.name} — Teacher Assignments
+            </h2>
+            <p className="text-sm text-[var(--color-text-secondary)] mt-0.5">
+              Assign teachers to each subject in each section
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+          >
+            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-auto p-6">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <span className="w-6 h-6 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+              <span className="ml-3 text-[var(--color-text-secondary)]">Loading…</span>
+            </div>
+          ) : sections.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="text-[var(--color-text-secondary)]">No sections found for this class. Create sections first.</p>
+            </div>
+          ) : linked.length === 0 ? (
+            <div className="text-center py-16">
+              <p className="text-[var(--color-text-secondary)]">No subjects linked to this class. Link subjects first.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider bg-gray-50 rounded-tl-lg sticky left-0 z-10 min-w-[120px]">
+                      Section
+                    </th>
+                    {linked.map((subj, i) => (
+                      <th
+                        key={subj.subject_id}
+                        className="text-center px-3 py-3 text-xs font-semibold uppercase tracking-wider bg-gray-50 min-w-[160px]"
+                        style={{ color: chipColors[i % chipColors.length].text }}
+                      >
+                        {subj.subject_name}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sections.map(sec => (
+                    <tr key={sec.id} className="border-t border-gray-100">
+                      <td className="px-4 py-3 sticky left-0 bg-white z-10">
+                        <div className="flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-[var(--color-primary)]/10 flex items-center justify-center">
+                            <span className="text-xs font-bold text-[var(--color-primary)]">
+                              {(sec.name ?? '?')[0]}
+                            </span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-[var(--color-text)]">Section {sec.name}</p>
+                            <p className="text-[10px] text-[var(--color-text-secondary)]">Cap: {sec.capacity}</p>
+                          </div>
+                        </div>
+                      </td>
+                      {linked.map(subj => {
+                        const key = `${sec.id}-${subj.subject_id}`;
+                        const assignment = assignmentMap[key];
+                        const teacher = assignment ? (instructorMap[assignment.instructor_id] || null) : null;
+                        const teacherName = teacher
+                          ? `${teacher.first_name || ''} ${teacher.last_name || ''}`.trim() || teacher.email
+                          : null;
+
+                        return (
+                          <td key={subj.subject_id} className="px-3 py-3 text-center">
+                            {assignment ? (
+                              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-green-50 border border-green-200 text-sm group">
+                                <div className="w-6 h-6 rounded-full bg-green-500 flex items-center justify-center flex-shrink-0">
+                                  <span className="text-white text-[10px] font-bold">
+                                    {(teacherName || '?')[0].toUpperCase()}
+                                  </span>
+                                </div>
+                                <span className="font-medium text-green-800 text-xs max-w-[100px] truncate">
+                                  {teacherName || 'Teacher'}
+                                </span>
+                                <button
+                                  onClick={() => handleRemove(assignment.id)}
+                                  disabled={deleteMutation.isPending}
+                                  className="w-4 h-4 rounded-full flex items-center justify-center text-green-400 hover:text-red-500 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                                  title="Remove assignment"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ) : (
+                              <select
+                                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-[var(--color-text-secondary)] hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 focus:border-[var(--color-primary)] transition-colors cursor-pointer bg-white"
+                                value=""
+                                onChange={e => handleAssign(sec.id, subj.subject_id, e.target.value)}
+                                disabled={createMutation.isPending}
+                              >
+                                <option value="">— Assign —</option>
+                                {instructors.map(t => (
+                                  <option key={t.id} value={t.user_id || t.id}>
+                                    {`${t.first_name || ''} ${t.last_name || ''}`.trim() || t.email}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
+          <button onClick={onClose} className="btn-secondary">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Classes Page ────────────────────────────────────────────────── */
+export default function Classes() {
+  const { user } = useAuth();
+  const isTeacher = user?.roles?.includes('teacher');
+  const canEdit = user?.usr === 'Administrator'
+    || (user?.roles || []).includes('Administrator')
+    || (user?.roles || []).includes('System Manager')
+    || (user?.roles || []).includes('super_admin')
+    || (user?.roles || []).includes('principal');
+
+  const { data: classes = [], isLoading: loadingClasses } = useClasses();
+  const { data: allSubjects = [] } = useSubjects();
+
+  const { data: teacherProfile, isLoading: loadingTeacher } = useQuery({
+    queryKey: ['TeacherProfile', user?.email],
+    queryFn: async () => {
+      const res = await client.get('/academic/my-teaching-profile');
+      return res.data;
+    },
+    enabled: !!(isTeacher && !canEdit),
+  });
+
+  const [search, setSearch] = useState('');
+  const [teacherModal, setTeacherModal] = useState(null); // class object or null
+
+  const filtered = classes.filter(c =>
+    (c.name ?? '').toLowerCase().includes(search.toLowerCase())
+  );
+
+  const totalLinks = classes.reduce((sum, c) => sum + (c.subject_count ?? 0), 0);
+  const withSubjects = classes.filter(c => (c.subject_count ?? 0) > 0).length;
+
+  const isLoading = loadingClasses || loadingTeacher;
+
+  // Teacher POV: Restricted View
+  if (isTeacher && !canEdit) {
+    const assignments = teacherProfile?.assignments || [];
+    
+    // Group by class to make it look like the curriculum table
+    const grouped = {};
+    assignments.forEach(a => {
+      if (!grouped[a.class_id]) {
+        grouped[a.class_id] = {
+          class_id: a.class_id,
+          class_name: a.class_name,
+          class_order: a.class_order,
+          subjects: new Map(), // subject_id -> { subject_name, sections: [] }
+        };
+      }
+      
+      const classData = grouped[a.class_id];
+      if (!classData.subjects.has(a.subject_id)) {
+        classData.subjects.set(a.subject_id, {
+          subject_id: a.subject_id,
+          subject_name: a.subject_name,
+          sections: new Set(),
+        });
+      }
+      classData.subjects.get(a.subject_id).sections.add(a.section_name);
+    });
+
+    const teacherClasses = Object.values(grouped).sort((a, b) => a.class_order - b.class_order);
+
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="eyebrow">Academics</div>
+            <h1 className="text-3xl font-bold text-[var(--color-text)] -mt-1">My Classes & Curriculum</h1>
+            <p className="text-[var(--color-text-secondary)] mt-1">
+              Your assigned classes and subjects
+            </p>
+          </div>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <span className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+            <span className="ml-3 text-[var(--color-text-secondary)]">Loading your curriculum…</span>
+          </div>
+        ) : teacherClasses.length === 0 ? (
+          <div className="card text-center py-16">
+            <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            </div>
+            <p className="text-[var(--color-text-secondary)]">You are not assigned to any classes yet.</p>
+          </div>
+        ) : (
+          <div className="card overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider w-44">Class</th>
+                    <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">Your Subjects & Sections</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teacherClasses.map((cls, idx) => (
+                    <tr key={cls.class_id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors group">
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm"
+                            style={{
+                              background: `linear-gradient(135deg, ${
+                                ['#3b82f6','#10b981','#8b5cf6','#f59e0b','#ec4899','#06b6d4'][idx % 6]
+                              }, ${
+                                ['#6366f1','#14b8a6','#a855f7','#f97316','#f43f5e','#0ea5e9'][idx % 6]
+                              })`
+                            }}
+                          >
+                            {cls.class_name?.substring(0, 2) || '?'}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-[var(--color-text)] leading-tight">Class {cls.class_name}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <div className="flex flex-wrap gap-2">
+                          {Array.from(cls.subjects.values()).map((subj, i) => (
+                            <span
+                              key={subj.subject_id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border"
+                              style={{ 
+                                backgroundColor: chipColors[i % chipColors.length].bg, 
+                                color: chipColors[i % chipColors.length].text,
+                                borderColor: 'transparent'
+                              }}
+                            >
+                              {subj.subject_name}
+                              <span className="text-[10px] uppercase opacity-70 bg-black/5 px-1.5 py-0.5 rounded ml-1">
+                                Sec {Array.from(subj.sections).sort().join(', ')}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -126,194 +477,165 @@ export default function Classes() {
       <div className="flex items-center justify-between">
         <div>
           <div className="eyebrow">Academics</div>
-          <h1 className="text-3xl font-bold text-[var(--color-text)] -mt-1">Classes</h1>
+          <h1 className="text-3xl font-bold text-[var(--color-text)] -mt-1">Classes & Curriculum</h1>
           <p className="text-[var(--color-text-secondary)] mt-1">
-            Manage class groups and sections
-            {selectedYear && (
-              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-[#BBF7D0] text-[#2ED05D]">
-                {selectedYear}
-              </span>
-            )}
+            Assign subjects to each class — your entire curriculum at a glance
           </p>
         </div>
-        <button onClick={openAdd} className="btn-primary flex items-center gap-2 group">
-          <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center transition-all duration-300 group-hover:bg-white/30 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </span>
-          Add Class
-        </button>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          { label: 'Total Classes', value: classes.length, color: 'blue' },
-          { label: 'Programs', value: programs.length, color: 'purple' },
-          { label: 'Academic Year', value: settings?.academic_year || '-', color: 'amber' },
-          { label: 'Active', value: classes.length, color: 'green' },
-        ].map(stat => (
-          <div key={stat.label} className="card text-center py-4">
-            <p className="text-2xl font-bold text-[var(--color-text)]">{stat.value}</p>
-            <p className="text-sm text-[var(--color-text-secondary)] mt-1">{stat.label}</p>
+        {!isLoading && (
+          <div className="hidden sm:flex items-center gap-6 text-right">
+            <div>
+              <p className="text-2xl font-bold text-[var(--color-text)]">{classes.length}</p>
+              <p className="text-xs text-[var(--color-text-secondary)]">Classes</p>
+            </div>
+            <div className="w-px h-10 bg-gray-200" />
+            <div>
+              <p className="text-2xl font-bold text-[var(--color-primary)]">{totalLinks}</p>
+              <p className="text-xs text-[var(--color-text-secondary)]">Subject Links</p>
+            </div>
+            <div className="w-px h-10 bg-gray-200" />
+            <div>
+              <p className="text-2xl font-bold" style={{ color: withSubjects === classes.length ? '#10b981' : '#f59e0b' }}>
+                {withSubjects}/{classes.length}
+              </p>
+              <p className="text-xs text-[var(--color-text-secondary)]">Configured</p>
+            </div>
           </div>
-        ))}
+        )}
       </div>
 
-      {/* Table */}
-      <div className="card">
-        <div className="flex items-center gap-4 mb-4">
+      {/* Search */}
+      {!isLoading && classes.length > 0 && (
+        <div className="flex items-center gap-4">
           <div className="relative flex-1 max-w-sm">
             <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
-            <input type="text" placeholder="Search classes…" value={search}
-              onChange={e => setSearch(e.target.value)} className="input pl-11" />
-          </div>
-          <p className="text-sm text-[var(--color-text-secondary)]">{filtered.length} records</p>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-100">
-                {['Class Name', 'Program / Standard', 'Class Teacher', 'Academic Year', 'Group Based On', 'Max Students', 'Actions'].map(h => (
-                  <th key={h} className="table-header">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td colSpan={7} className="table-cell text-center py-12">
-                  <span className="w-6 h-6 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin inline-block" />
-                  <span className="ml-2 text-[var(--color-text-secondary)]">Loading…</span>
-                </td></tr>
-              ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="table-cell text-center py-12 text-[var(--color-text-secondary)]">
-                  No classes found. Click "Add Class" to create one.
-                </td></tr>
-              ) : filtered.map(cls => {
-                const teacher = users.find(u => u.name === cls.class_teacher);
-                return (
-                <tr key={cls.name} className="hover:bg-gray-50 transition-colors">
-                  <td className="table-cell font-medium text-[var(--color-primary)]">{cls.student_group_name || cls.name}</td>
-                  <td className="table-cell">{cls.program || '—'}</td>
-                  <td className="table-cell">{teacher?.full_name || teacher?.name || '—'}</td>
-                  <td className="table-cell">{cls.academic_year || '—'}</td>
-                  <td className="table-cell">
-                    <span className="px-2 py-1 bg-[#E8F9ED] text-[#2ED05D] rounded-lg text-xs font-medium">
-                      {cls.group_based_on || 'Batch'}
-                    </span>
-                  </td>
-                  <td className="table-cell">{cls.max_strength || '—'}</td>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => openEdit(cls)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors group" title="Edit">
-                        <span className="w-5 h-5 flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:translate-x-0.5 group-hover:-translate-y-[1px]">
-                          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                        </span>
-                      </button>
-                      <button onClick={() => setDeleteConfirm(cls)} className="p-2 hover:bg-red-50 rounded-lg transition-colors group" title="Delete">
-                        <span className="w-5 h-5 flex items-center justify-center transition-all duration-300 group-hover:scale-105 group-hover:translate-x-0.5 group-hover:-translate-y-[1px]">
-                          <svg className="w-4 h-4 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </span>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Add/Edit Modal */}
-      {showModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-[var(--color-text)]">{editing ? 'Edit Class' : 'Add Class'}</h2>
-              <button onClick={() => setShowModal(false)} className="group w-6 h-6 rounded-full bg-black/5 flex items-center justify-center group-hover:bg-black/10 transition-all duration-300">
-                <svg className="w-3.5 h-3.5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <form onSubmit={handleSave} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">
-                  Class Name <span className="text-red-500">*</span>
-                </label>
-                <input name="student_group_name" value={form.student_group_name} onChange={handleChange}
-                  className="input" placeholder="e.g. 5th Standard - Section A" required />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Program / Standard</label>
-                <select name="program" value={form.program} onChange={handleChange} className="input">
-                  <option value="">— Select Program —</option>
-                  {programs.map(p => <option key={p.name} value={p.name}>{p.program_name || p.name}</option>)}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Academic Year</label>
-                  <input name="academic_year" value={form.academic_year} onChange={handleChange} className="input" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Max Students</label>
-                  <input type="number" name="max_strength" value={form.max_strength} onChange={handleChange}
-                    className="input" placeholder="40" min="1" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Group Based On</label>
-                <select name="group_based_on" value={form.group_based_on} onChange={handleChange} className="input">
-                  <option value="Batch">Batch</option>
-                  <option value="Course">Course</option>
-                  <option value="Activity">Activity</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Class Teacher</label>
-                <select name="class_teacher" value={form.class_teacher} onChange={handleChange} className="input">
-                  <option value="">— Select Teacher —</option>
-                  {users.map(u => <option key={u.name} value={u.name}>{u.full_name || u.name}</option>)}
-                </select>
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
-                <button type="submit" disabled={saving} className="btn-primary flex items-center gap-2 disabled:opacity-50 group">
-                  {saving && <span className="w-4 h-4 flex items-center justify-center"><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /></span>}
-                  {editing ? 'Update' : 'Create'}
-                </button>
-              </div>
-            </form>
+            <input
+              type="text"
+              placeholder="Search classes…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="input pl-11"
+            />
           </div>
         </div>
       )}
 
-      {/* Delete Confirm */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6">
-            <h3 className="text-lg font-bold text-[var(--color-text)] mb-2">Delete Class</h3>
-            <p className="text-[var(--color-text-secondary)] mb-6">
-              Delete <strong>{deleteConfirm.student_group_name}</strong>? This cannot be undone.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="btn-secondary">Cancel</button>
-              <button onClick={handleDelete} disabled={deleteMutation.isPending} className="px-4 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600 transition-colors">
-                Delete
-              </button>
-            </div>
+      {/* Loading */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <span className="w-8 h-8 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+          <span className="ml-3 text-[var(--color-text-secondary)]">Loading classes…</span>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="card text-center py-16">
+          <div className="w-16 h-16 bg-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+          </div>
+          <p className="text-[var(--color-text-secondary)]">
+            {search ? 'No classes match your search.' : 'No classes found. Create classes first.'}
+          </p>
+        </div>
+      ) : (
+        /* ── Curriculum Table ── */
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider w-44">
+                    Class
+                  </th>
+                  <th className="text-left px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">
+                    Subjects
+                  </th>
+                  <th className="text-center px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider w-24">
+                    Count
+                  </th>
+                  {canEdit && (
+                    <th className="text-center px-5 py-3 text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider w-32">
+                      Teachers
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((cls, idx) => (
+                  <tr
+                    key={cls.id}
+                    className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors group"
+                  >
+                    {/* Class Name */}
+                    <td className="px-5 py-4">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-sm"
+                          style={{
+                            background: `linear-gradient(135deg, ${
+                              ['#3b82f6','#10b981','#8b5cf6','#f59e0b','#ec4899','#06b6d4'][idx % 6]
+                            }, ${
+                              ['#6366f1','#14b8a6','#a855f7','#f97316','#f43f5e','#0ea5e9'][idx % 6]
+                            })`
+                          }}
+                        >
+                          {cls.name?.substring(0, 2) || '?'}
+                        </div>
+                        <div>
+                          <p className="font-semibold text-[var(--color-text)] leading-tight">Class {cls.name}</p>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Subjects */}
+                    <td className="px-5 py-4">
+                      <ClassSubjectChips
+                        classId={cls.id}
+                        canEdit={canEdit}
+                        allSubjects={allSubjects}
+                      />
+                    </td>
+
+                    {/* Count Badge */}
+                    <td className="px-5 py-4 text-center">
+                      <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
+                        (cls.subject_count ?? 0) > 0
+                          ? 'bg-green-100 text-green-700'
+                          : 'bg-gray-100 text-gray-400'
+                      }`}>
+                        {cls.subject_count ?? 0}
+                      </span>
+                    </td>
+
+                    {/* Manage Teachers Button */}
+                    {canEdit && (
+                      <td className="px-5 py-4 text-center">
+                        <button
+                          onClick={() => setTeacherModal(cls)}
+                          disabled={(cls.subject_count ?? 0) === 0}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-[var(--color-primary)] bg-[var(--color-primary)]/5 hover:bg-[var(--color-primary)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                          Assign
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
+      )}
+
+      {/* Teacher Assignment Modal */}
+      {teacherModal && (
+        <TeacherModal cls={teacherModal} onClose={() => setTeacherModal(null)} />
       )}
     </div>
   );

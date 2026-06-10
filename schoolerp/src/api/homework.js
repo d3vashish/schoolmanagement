@@ -10,7 +10,7 @@ export async function getHomeworkList(filters = {}) {
   if (filters.status) filterArr.push(['status', '=', filters.status]);
 
   const items = await getList(DOCTYPE, filterArr, [
-    'name', 'title', 'description', 'course', 'course_name',
+    'name', 'title', 'description', 'course', 'course_name', 'subject_id',
     'student_group', 'class_name', 'academic_year', 'due_date',
     'max_points', 'assigned_by', 'assigned_by_name', 'assigned_date',
     'status', 'gc_course_id', 'gc_course_work_id', 'gc_invite_code',
@@ -30,6 +30,7 @@ export async function createHomework(data) {
   const doc = {
     title: data.title,
     description: data.description || '',
+    subject_id: data.subject_id || null,
     course: data.courseId || '',
     course_name: data.courseName || '',
     student_group: data.studentGroup || '',
@@ -50,6 +51,7 @@ export async function updateHomework(name, updates) {
   const mapped = {};
   if (updates.title !== undefined) mapped.title = updates.title;
   if (updates.description !== undefined) mapped.description = updates.description;
+  if (updates.subject_id !== undefined) mapped.subject_id = updates.subject_id;
   if (updates.courseId !== undefined) mapped.course = updates.courseId;
   if (updates.courseName !== undefined) mapped.course_name = updates.courseName;
   if (updates.studentGroup !== undefined) mapped.student_group = updates.studentGroup;

@@ -20,6 +20,9 @@ async def mark_attendance(
     status: str,
     marked_by: str,
     period_no: int | None = None,
+    section_id: str | None = None,
+    subject_id: str | None = None,
+    academic_year_id: str | None = None,
     db: AsyncSession = None,
 ) -> Attendance:
     if not await is_working_day(attendance_date, db):
@@ -33,6 +36,9 @@ async def mark_attendance(
             period_no=period_no,
             status=status,
             marked_by=marked_by,
+            section_id=section_id,
+            subject_id=subject_id,
+            academic_year_id=academic_year_id,
         )
         .on_conflict_do_update(
             index_elements=["student_id", "date", "period_no"],

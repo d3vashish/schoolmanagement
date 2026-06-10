@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { getDoc } from '../api/frappe';
-import { useFrappeList, useFrappeCreate, useFrappeUpdate, useFrappeDelete } from '../hooks/useFrappeQuery';
+import { useSubjects, useCreateSubject, useUpdateSubject, useDeleteSubject } from '../hooks/useSubjects';
 
-const emptyForm = { course_name: '', course_code: '', department: '', description: '' };
+const emptyForm = { name: '', code: '', department: '', description: '', credit_hours: '', lab_fee_amount: '' };
 
 export default function Subjects() {
   const { user } = useAuth();
-  const isTeacher = user?.roles?.includes('Instructor');
-  const isAdmin = user?.usr === 'Administrator' || (user?.roles || []).includes('Administrator') || (user?.roles || []).includes('System Manager');
+  const isAdmin = user?.usr === 'Administrator' || (user?.roles || []).includes('Administrator') || (user?.roles || []).includes('System Manager') || (user?.roles || []).includes('super_admin') || (user?.roles || []).includes('principal');
   const canEdit = isAdmin;
 
   const [search, setSearch]         = useState('');
@@ -17,49 +15,60 @@ export default function Subjects() {
   const [deleteConfirm, setDeleteConfirm] = useState(null);
   const [form, setForm]             = useState(emptyForm);
 
-  const { data: subjects = [], isLoading: loading } = useFrappeList('Course', [], ['name', 'course_name'], 200);
+  const { data: subjects = [], isLoading: loading } = useSubjects();
 
-  const createMutation = useFrappeCreate('Course', {
-    onSuccess: () => { setShowModal(false); setForm(emptyForm); },
-  });
-  const updateMutation = useFrappeUpdate('Course', {
-    onSuccess: () => { setShowModal(false); setEditing(null); setForm(emptyForm); },
-  });
-  const deleteMutation = useFrappeDelete('Course', {
-    onSuccess: () => setDeleteConfirm(null),
-  });
+  const createMutation = useCreateSubject();
+  const updateMutation = useUpdateSubject();
+  const deleteMutation = useDeleteSubject();
 
   const saving = createMutation.isPending || updateMutation.isPending;
 
   const filtered = subjects.filter(s =>
-    s.course_name?.toLowerCase().includes(search.toLowerCase()) ||
-    s.course_code?.toLowerCase().includes(search.toLowerCase()) ||
+    s.name?.toLowerCase().includes(search.toLowerCase()) ||
+    s.code?.toLowerCase().includes(search.toLowerCase()) ||
     s.department?.toLowerCase().includes(search.toLowerCase())
   );
 
   const openAdd = () => { setEditing(null); setForm(emptyForm); setShowModal(true); };
-  const openEdit = async (sub) => {
-    try {
-      const doc = await getDoc('Course', sub.name);
-      setEditing(doc);
-      setForm({ course_name: doc.course_name || '', course_code: doc.course_code || '',
-        department: doc.department || '', description: doc.description || '' });
-      setShowModal(true);
-    } catch (err) { console.error(err); }
+  
+  const openEdit = (sub) => {
+    setEditing(sub);
+    setForm({ 
+      name: sub.name || '', 
+      code: sub.code || '',
+      department: sub.department || '', 
+      description: sub.description || '',
+      credit_hours: sub.credit_hours || '',
+      lab_fee_amount: sub.lab_fee_amount || ''
+    });
+    setShowModal(true);
   };
 
   const handleSave = (e) => {
     e.preventDefault();
+    const payload = { ...form };
+    if (payload.credit_hours === '') payload.credit_hours = null;
+    else payload.credit_hours = parseInt(payload.credit_hours, 10);
+    
+    if (payload.lab_fee_amount === '') payload.lab_fee_amount = null;
+    else payload.lab_fee_amount = parseInt(payload.lab_fee_amount, 10);
+
     if (editing) {
-      updateMutation.mutate({ name: editing.name, data: form });
+      updateMutation.mutate({ id: editing.id, data: payload }, {
+        onSuccess: () => { setShowModal(false); setEditing(null); setForm(emptyForm); }
+      });
     } else {
-      createMutation.mutate(form);
+      createMutation.mutate(payload, {
+        onSuccess: () => { setShowModal(false); setForm(emptyForm); }
+      });
     }
   };
 
   const handleDelete = () => {
     if (!deleteConfirm) return;
-    deleteMutation.mutate(deleteConfirm.name);
+    deleteMutation.mutate(deleteConfirm.id, {
+      onSuccess: () => setDeleteConfirm(null)
+    });
   };
 
   const subjectColors = ['bg-blue-100 text-blue-700', 'bg-green-100 text-green-700',
@@ -118,18 +127,30 @@ export default function Subjects() {
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {filtered.map((sub, i) => (
-                <div key={sub.name}
+                <div key={sub.id}
                   className="card hover:shadow-md transition-all duration-200 group border-2 border-transparent hover:border-[var(--color-primary)]/20">
                   <div className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold mb-3 ${subjectColors[i % subjectColors.length]}`}>
-                    {sub.course_code || sub.name.substring(0, 4).toUpperCase()}
+                    {sub.code || sub.name.substring(0, 4).toUpperCase()}
                   </div>
-                  <h3 className="font-semibold text-[var(--color-text)] mb-1 leading-tight">{sub.course_name || sub.name}</h3>
+                  <h3 className="font-semibold text-[var(--color-text)] mb-1 leading-tight">{sub.name}</h3>
                   {sub.department && (
                     <p className="text-xs text-[var(--color-text-secondary)] mb-2">{sub.department}</p>
                   )}
                   {sub.description && (
                     <p className="text-xs text-[var(--color-text-secondary)] line-clamp-2 mb-3">{sub.description}</p>
                   )}
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {sub.credit_hours != null && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-800">
+                        {sub.credit_hours} Credits
+                      </span>
+                    )}
+                    {sub.lab_fee_amount != null && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800">
+                        Fee: ${sub.lab_fee_amount}
+                      </span>
+                    )}
+                  </div>
                   {canEdit && (
                     <div className="flex items-center gap-2 mt-auto pt-2 border-t border-gray-100 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => openEdit(sub)}
@@ -166,14 +187,14 @@ export default function Subjects() {
                 <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">
                   Subject Name <span className="text-red-500">*</span>
                 </label>
-                <input name="course_name" value={form.course_name}
-                  onChange={e => setForm(p => ({ ...p, course_name: e.target.value }))}
+                <input name="name" value={form.name}
+                  onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                   className="input" placeholder="e.g. Mathematics" required />
               </div>
               <div>
                 <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Subject Code</label>
-                <input name="course_code" value={form.course_code}
-                  onChange={e => setForm(p => ({ ...p, course_code: e.target.value }))}
+                <input name="code" value={form.code}
+                  onChange={e => setForm(p => ({ ...p, code: e.target.value }))}
                   className="input" placeholder="e.g. MATH101" />
               </div>
               <div>
@@ -187,6 +208,20 @@ export default function Subjects() {
                 <textarea name="description" value={form.description}
                   onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
                   className="input resize-none" rows={3} placeholder="Brief description…" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Credit Hours</label>
+                  <input type="number" name="credit_hours" value={form.credit_hours}
+                    onChange={e => setForm(p => ({ ...p, credit_hours: e.target.value }))}
+                    className="input" placeholder="e.g. 3" min="0" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text)] mb-1.5">Lab Fee ($)</label>
+                  <input type="number" name="lab_fee_amount" value={form.lab_fee_amount}
+                    onChange={e => setForm(p => ({ ...p, lab_fee_amount: e.target.value }))}
+                    className="input" placeholder="e.g. 50" min="0" />
+                </div>
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Cancel</button>
@@ -205,7 +240,7 @@ export default function Subjects() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm p-6">
             <h3 className="text-lg font-bold text-[var(--color-text)] mb-2">Delete Subject</h3>
-            <p className="text-[var(--color-text-secondary)] mb-6">Delete <strong>{deleteConfirm.course_name}</strong>?</p>
+            <p className="text-[var(--color-text-secondary)] mb-6">Delete <strong>{deleteConfirm.name}</strong>?</p>
             <div className="flex justify-end gap-3">
               <button onClick={() => setDeleteConfirm(null)} className="btn-secondary">Cancel</button>
               <button onClick={handleDelete} disabled={deleteMutation.isPending} className="px-4 py-2 bg-red-500 text-white rounded-xl font-medium hover:bg-red-600">Delete</button>

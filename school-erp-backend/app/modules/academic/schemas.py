@@ -31,6 +31,7 @@ class ClassResponse(BaseModel):
     id: UUID
     name: str
     order: int
+    subject_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -40,6 +41,7 @@ class SectionCreate(BaseModel):
     name: str
     capacity: int
     academic_year_id: UUID
+    class_teacher_id: Optional[UUID] = None
 
 
 class SectionResponse(BaseModel):
@@ -50,6 +52,13 @@ class SectionResponse(BaseModel):
     academic_year_id: UUID
     program: str = ""
     academic_year: str = ""
+    class_teacher_id: Optional[UUID] = None
+
+class SectionUpdate(BaseModel):
+    name: Optional[str] = None
+    capacity: Optional[int] = None
+    class_id: Optional[UUID] = None
+    class_teacher_id: Optional[UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -58,6 +67,12 @@ class SubjectCreate(BaseModel):
     name: str
     code: str
     is_graded: bool = True
+    department: Optional[str] = None
+    description: Optional[str] = None
+    credit_hours: Optional[int] = None
+    lab_fee_amount: Optional[int] = None
+    grading_scheme_id: Optional[UUID] = None
+    is_active: bool = True
 
 
 class SubjectResponse(BaseModel):
@@ -65,6 +80,47 @@ class SubjectResponse(BaseModel):
     name: str
     code: str
     is_graded: bool
+    department: Optional[str] = None
+    description: Optional[str] = None
+    credit_hours: Optional[int] = None
+    lab_fee_amount: Optional[int] = None
+    grading_scheme_id: Optional[UUID] = None
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+class SubjectUpdate(BaseModel):
+    name: Optional[str] = None
+    code: Optional[str] = None
+    is_graded: Optional[bool] = None
+    department: Optional[str] = None
+    description: Optional[str] = None
+    credit_hours: Optional[int] = None
+    lab_fee_amount: Optional[int] = None
+    grading_scheme_id: Optional[UUID] = None
+    is_active: Optional[bool] = None
+
+
+class ClassSubjectCreate(BaseModel):
+    subject_id: UUID
+
+
+class ClassSubjectResponse(BaseModel):
+    id: UUID
+    class_id: UUID
+    subject_id: UUID
+    subject_name: str = ""
+    subject_code: str = ""
+
+    model_config = {"from_attributes": True}
+
+
+class ClassDetailResponse(BaseModel):
+    id: UUID
+    name: str
+    order: int
+    subjects: list[ClassSubjectResponse] = []
+    sections: list[SectionResponse] = []
 
     model_config = {"from_attributes": True}
 
@@ -110,15 +166,23 @@ class StudentProfileResponse(BaseModel):
     user_id: UUID
     first_name: str
     last_name: str
+    name: str | None = None
     date_of_birth: datetime | None = None
     admission_number: str
-    class_id: UUID | None = None
     student_group_name: str | None = None
+    section_name: str | None = None
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
     email: str | None = None
+    student_email_id: str | None = None
+    student_email: str | None = None
+    student_mobile_number: str | None = None
+    student_mobile: str | None = None
+    gender: str | None = None
     is_active: bool = True
+    enabled: int | None = None
+    student_name: str | None = None
     creation: datetime | None = None
 
     model_config = {"from_attributes": True}
@@ -159,12 +223,12 @@ class StudentFinancialResponse(BaseModel):
 
 
 class InstructorResponse(BaseModel):
-    id: UUID
+    id: UUID | None = None
     user_id: UUID
     email: str | None = None
-    first_name: str
-    last_name: str
-    employee_id: str
+    first_name: str | None = None
+    last_name: str | None = None
+    employee_id: str | None = None
     department: str | None = None
     qualification: str | None = None
     is_active: bool = True
@@ -179,6 +243,7 @@ class StudentCreate(BaseModel):
     password: str
     date_of_birth: date | None = None
     class_id: str | None = None
+    academic_year_id: str | None = None
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
@@ -188,7 +253,6 @@ class StudentUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     date_of_birth: date | None = None
-    class_id: str | None = None
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
@@ -230,20 +294,40 @@ class SectionDetailResponse(BaseModel):
 class EnrollmentCreate(BaseModel):
     student_id: UUID
     class_id: UUID
-    academic_year_id: UUID | None = None
-
+    section_id: UUID | None = None
+    academic_year_id: UUID
+    roll_number: str | None = None
 
 class EnrollmentResponse(BaseModel):
     id: UUID
     student_id: UUID
     student_name: str | None = None
-    class_id: UUID | None = None
+    class_id: UUID
     class_name: str | None = None
-    academic_year_id: UUID | None = None
+    section_id: UUID | None = None
+    section_name: str | None = None
+    academic_year_id: UUID
     academic_year_name: str | None = None
-    enrollment_date: datetime | None = None
+    roll_number: str | None = None
+    status: str
+    enrolled_at: datetime
+    left_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+class EnrollmentUpdate(BaseModel):
+    section_id: UUID | None = None
+    roll_number: str | None = None
+    status: str | None = None
+    left_at: datetime | None = None
+
+
+class TransferCreate(BaseModel):
+    student_id: UUID
+    to_class_id: UUID
+    to_section_id: UUID | None = None
+    to_academic_year_id: UUID
+    roll_number: str | None = None
 
 
 class TeacherAssignmentCreate(BaseModel):
@@ -261,11 +345,11 @@ class TeacherAssignmentUpdate(BaseModel):
 
 
 class TeacherAssignmentResponse(BaseModel):
-    id: str
-    instructor_id: str
-    section_id: str
-    subject_id: str
-    class_id: str
+    id: UUID
+    instructor_id: UUID
+    section_id: UUID
+    subject_id: UUID
+    class_id: UUID
     created_at: datetime
     updated_at: datetime
 

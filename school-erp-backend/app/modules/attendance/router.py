@@ -26,6 +26,7 @@ from app.modules.attendance.service import (
     mark_attendance,
     update_attendance_status,
 )
+from app.modules.academic.models import Enrollment
 from app.modules.auth.models import StudentProfile
 
 admin_only = [role_required("super_admin", "principal")]
@@ -49,6 +50,9 @@ async def mark(
         status=body.status.upper(),
         marked_by=current_user["id"],
         period_no=body.period_no,
+        section_id=body.section_id,
+        subject_id=body.subject_id,
+        academic_year_id=body.academic_year_id,
         db=db,
     )
 
@@ -76,6 +80,9 @@ async def mark_bulk(
             status=r.status.upper(),
             marked_by=current_user["id"],
             period_no=r.period_no,
+            section_id=r.section_id,
+            subject_id=r.subject_id,
+            academic_year_id=r.academic_year_id,
             db=db,
         )
         results.append({"student_id": r.student_id, "status": rec.status})
@@ -251,6 +258,7 @@ async def student_leaves(student_id: str, db: AsyncSession = Depends(get_db)):
 async def attendance_by_section(
     section_id: str,
     date: date,
+    subject_id: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -278,11 +286,11 @@ async def attendance_by_section(
         if not ta.first():
             raise HTTPException(status_code=403, detail="Access denied")
 
-    records = await db.execute(
-        select(Attendance)
-        .where(Attendance.date == date)
-        .order_by(Attendance.student_id)
-    )
+    q = select(Attendance).where(Attendance.date == date)
+    if subject_id:
+        q = q.where(Attendance.subject_id == subject_id)
+    q = q.order_by(Attendance.student_id)
+    records = await db.execute(q)
     return records.scalars().all()
 
 
@@ -305,14 +313,17 @@ async def attendance_overview(
         Attendance.date,
         Attendance.period_no,
         Attendance.status,
-        StudentProfile.class_id.label("student_group"),
+        StudentProfile.id.label("student_group"),
     ).join(StudentProfile, Attendance.student_id == StudentProfile.id)
 
     # Apply role scoping directly for attendance
     if role == "teacher":
         ta_alias = TeacherAssignment.__table__.alias()
         section_ids_q = select(ta_alias.c.section_id).where(ta_alias.c.instructor_id == uid).subquery()
-        student_ids_q = select(StudentProfile.id).where(StudentProfile.section_id.in_(section_ids_q)).subquery()
+        student_ids_q = select(Enrollment.student_id).where(
+                Enrollment.section_id.in_(section_ids_q),
+                Enrollment.status == "ACTIVE",
+            ).subquery()
         base_query = base_query.where(Attendance.student_id.in_(student_ids_q))
     elif role == "student":
         sp_q = select(StudentProfile.id).where(StudentProfile.user_id == uid).scalar_subquery()

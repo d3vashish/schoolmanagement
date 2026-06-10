@@ -15,12 +15,19 @@ export const AuthProvider = ({ children }) => {
       });
       if (!res.ok) return null;
       const data = await res.json();
+      const rawRole = data.role || '';
+      const mappedRoles = [rawRole];
+      if (rawRole === 'teacher' || rawRole === 'instructor') mappedRoles.push('Instructor', 'teacher');
+      if (rawRole === 'super_admin' || rawRole === 'principal') mappedRoles.push('Administrator', 'System Manager');
+      if (rawRole === 'student') mappedRoles.push('Student');
+      if (rawRole === 'parent') mappedRoles.push('Parent');
+      
       return {
         name: data.email,
         email: data.email,
         full_name: data.email,
         usr: data.email,
-        roles: [data.role],
+        roles: mappedRoles,
         is_active: data.is_active,
         ...(data.mySection ? { mySection: data.mySection } : {}),
       };

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getDoc, getList, adminGetList, adminCallMethod } from '../api/frappe';
+import { getDoc, getList, adminGetList, adminCallMethod, client } from '../api/frappe';
 import { useFrappeCreate, useFrappeUpdate, useFrappeDelete } from '../hooks/useFrappeQuery';
 import { useQuery } from '@tanstack/react-query';
 
@@ -78,12 +78,6 @@ export default function Timetable() {
   const [selectedGroup, setSelectedGroup] = useState('');
   const [hoveredSlot, setHoveredSlot] = useState(null);
 
-  const scheduleFilters = isTeacher && user.instructorId
-    ? [['instructor', '=', user.instructorId]]
-    : isTeacher && teacherGroupNames.length > 0
-      ? [['student_group', 'in', teacherGroupNames]]
-      : [];
-
   const groupFilters = [];
   if (isTeacher && teacherGroupNames.length > 0) {
     groupFilters.push(['name', 'in', teacherGroupNames]);
@@ -91,11 +85,46 @@ export default function Timetable() {
     groupFilters.push(['academic_year', '=', selectedYear]);
   }
 
-  const listSchedules = () => isAdmin
-    ? adminGetList('Course Schedule', scheduleFilters,
-        ['name', 'course', 'student_group', 'instructor_name', 'schedule_date', 'from_time', 'to_time', 'room', 'class_schedule_color'], 300)
-    : getList('Course Schedule', scheduleFilters,
-        ['name', 'course', 'student_group', 'instructor_name', 'schedule_date', 'from_time', 'to_time', 'room', 'class_schedule_color'], 300);
+  const listSchedules = async () => {
+    try {
+      const params = {};
+      if (!isTeacher && selectedGroup) params.section_id = selectedGroup;
+      if (!isTeacher && selectedYear) params.academic_year_id = selectedYear;
+
+      const res = await client.get('/timetable/slots', { params });
+      let items = res.data;
+      if (!Array.isArray(items)) items = items.data || items.results || [];
+      
+      return items.map(s => {
+        const daysOfWeek = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+        const dayName = typeof s.day_of_week === 'number' ? daysOfWeek[s.day_of_week] : (s.day_of_week || s.day || '');
+        
+        let fromTime = s.start_time || s.from_time || '';
+        let toTime = s.end_time || s.to_time || '';
+        if (!fromTime && s.period_no) {
+          const hour = s.period_no + 7;
+          fromTime = `${String(hour).padStart(2, '0')}:00:00`;
+          toTime = `${String(hour + 1).padStart(2, '0')}:00:00`;
+        }
+
+        return {
+          name: s.id || s.name,
+          course: s.course_name || s.subject_name || s.subject_id || s.course || '',
+          student_group: s.section_name || s.section_id || s.student_group || '',
+          day_of_week: dayName,
+          from_time: fromTime,
+          to_time: toTime,
+          room: s.room_name || s.room || '',
+          instructor_id: s.teacher_id || s.instructor || '',
+          instructor_name: s.teacher_name || s.instructor_name || '',
+          schedule_date: s.schedule_date || null
+        };
+      });
+    } catch (err) {
+      console.error(err);
+      return [];
+    }
+  };
 
   const listCourses = () => isAdmin
     ? adminGetList('Course', [], ['name', 'course_name'], 100)
@@ -110,9 +139,8 @@ export default function Timetable() {
     : getList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100);
 
   const { data: schedules = [], isLoading: loading } = useQuery({
-    queryKey: ['Course Schedule', 'list', selectedYear, user?.instructorId, isAdmin],
+    queryKey: ['Course Schedule', 'list', selectedYear, selectedGroup, isTeacher],
     queryFn: listSchedules,
-    enabled: !isTeacher || !!user.instructorId || teacherGroupNames.length > 0,
   });
   const { data: courses = [] } = useQuery({
     queryKey: ['Course', 'list', isAdmin],
@@ -130,6 +158,13 @@ export default function Timetable() {
     staleTime: 2 * 60 * 1000,
   });
 
+  // Default to first group to avoid messy "All Classes" view
+  useEffect(() => {
+    if (!isTeacher && groups.length > 0 && !selectedGroup) {
+      setSelectedGroup(groups[0].name);
+    }
+  }, [groups, isTeacher, selectedGroup]);
+
   const createMutation = useFrappeCreate('Course Schedule', {
     onSuccess: () => { setShowModal(false); setEditing(null); },
   });
@@ -139,18 +174,6 @@ export default function Timetable() {
   const deleteMutation = useFrappeDelete('Course Schedule');
 
   const saving = createMutation.isPending || updateMutation.isPending;
-
-  useEffect(() => {
-    if (isTeacher && groups.length > 0 && !selectedGroup) {
-      const groupsWithSchedules = new Set(schedules.map(s => s.student_group));
-      const sorted = [...groups].sort((a, b) => {
-        const aHas = groupsWithSchedules.has(a.name) ? 0 : 1;
-        const bHas = groupsWithSchedules.has(b.name) ? 0 : 1;
-        return aHas - bHas;
-      });
-      setSelectedGroup(sorted[0].name);
-    }
-  }, [isTeacher, groups, selectedGroup, schedules]);
 
   const yearGroupNames = groups.map(g => g.name);
   const filteredSchedules = selectedGroup
@@ -244,6 +267,7 @@ export default function Timetable() {
   const handleChange = (e) => setForm(p => ({ ...p, [e.target.name]: e.target.value }));
 
   const courseName = (id) => courses.find(c => c.name === id)?.course_name || id;
+  const groupName = (id) => groups.find(g => g.name === id)?.student_group_name || id;
 
   // Count periods per day
   const dayPeriodCounts = useMemo(() => {
@@ -276,27 +300,6 @@ export default function Timetable() {
     );
   }
 
-  if (isTeacher && !user.instructorId && teacherGroupNames.length === 0) {
-    return (
-      <div className="space-y-6 animate-fade">
-        <div>
-          <div className="eyebrow">Academics</div>
-          <h1 className="text-3xl font-bold text-[var(--color-text)] -mt-1">Timetable</h1>
-          <p className="text-[var(--color-text-secondary)] mt-1">Weekly class schedule</p>
-        </div>
-        <div className="card flex flex-col items-center justify-center py-20 text-center">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[var(--color-primary-light)] to-[var(--color-info-bg)] flex items-center justify-center mb-5">
-            <svg className="w-10 h-10 text-[var(--color-primary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6v6l4 2m-4-8a8 8 0 100 16 8 8 0 000-16z" />
-            </svg>
-          </div>
-          <h3 className="text-xl font-bold text-[var(--color-text)] mb-2">No timetable assigned</h3>
-          <p className="text-sm text-[var(--color-text-secondary)] max-w-xs">Contact your admin to assign you as an instructor and get your weekly schedule.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -307,13 +310,12 @@ export default function Timetable() {
           <p className="text-[var(--color-text-secondary)] mt-1">Weekly class schedule</p>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {isTeacher && teacherGroupNames.length === 1 ? (
-            <div className="input w-52 flex items-center bg-gray-50 text-gray-700 font-medium text-sm">
-              {teacherGroupNames[0]}
+          {isTeacher ? (
+            <div className="text-sm font-semibold text-[var(--color-primary)] px-3 py-1.5 bg-[var(--color-primary)]/10 rounded-lg">
+              My Schedule
             </div>
           ) : (
             <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)} className="input w-52">
-              <option value="">All Classes</option>
               {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
             </select>
           )}
@@ -475,18 +477,27 @@ export default function Timetable() {
                           )}
                         </div>
 
+                        {/* Class name (important for teachers so they know where to go) */}
+                        {isTeacher && (
+                          <div className="mb-1">
+                            <span className="text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-black/15 text-white/90 truncate max-w-full inline-block">
+                              {groupName(slot.student_group)}
+                            </span>
+                          </div>
+                        )}
+
                         {/* Course name */}
                         <p className="text-xs font-bold leading-snug truncate mb-1">
                           {courseName(slot.course)}
                         </p>
 
                         {/* Instructor */}
-                        {slot.instructor_name && (
+                        {(slot.instructor_name || slot.instructor_id) && (
                           <p className="text-[10px] opacity-75 truncate flex items-center gap-1">
                             <svg className="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                             </svg>
-                            {slot.instructor_name}
+                            {slot.instructor_name || instructors.find(i => i.name === slot.instructor_id)?.instructor_name || slot.instructor_id}
                           </p>
                         )}
 

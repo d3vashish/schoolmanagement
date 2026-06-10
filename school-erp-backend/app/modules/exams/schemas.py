@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date as dt_date
 from decimal import Decimal
 from uuid import UUID
 
@@ -9,9 +9,27 @@ class ExamCreate(BaseModel):
     name: str
     academic_year_id: UUID
     class_id: UUID
+    section_id: UUID | None = None
     grading_scheme_id: UUID | None = None
-    start_date: date
-    end_date: date
+    start_date: dt_date
+    end_date: dt_date
+
+
+class ExamSubjectCreate(BaseModel):
+    subject_id: UUID
+    max_marks: Decimal
+    date: dt_date | None = None
+
+
+class ExamSubjectResponse(BaseModel):
+    id: UUID
+    exam_id: UUID
+    subject_id: UUID
+    subject_name: str
+    max_marks: Decimal
+    date: dt_date | None
+
+    model_config = {"from_attributes": True}
 
 
 class ExamResponse(BaseModel):
@@ -19,9 +37,10 @@ class ExamResponse(BaseModel):
     name: str
     academic_year_id: UUID
     class_id: UUID
+    section_id: UUID | None
     grading_scheme_id: UUID | None
-    start_date: date
-    end_date: date
+    start_date: dt_date
+    end_date: dt_date
     status: str
 
     model_config = {"from_attributes": True}
@@ -45,7 +64,10 @@ class ExamResultResponse(BaseModel):
     id: UUID
     exam_id: UUID
     student_id: UUID
+    student_name: str | None = None
     subject_id: UUID
+    subject_name: str | None = None
+    section_id: UUID | None
     marks: Decimal | None
     max_marks: Decimal
     is_absent: bool
@@ -58,6 +80,7 @@ class ExamResultResponse(BaseModel):
 class AggregateResponse(BaseModel):
     exam_id: UUID
     student_id: UUID
+    section_id: UUID | None
     total_marks: Decimal
     max_total: Decimal
     percentage: Decimal
@@ -92,7 +115,8 @@ class ReportCardResponse(BaseModel):
     id: UUID
     exam_id: UUID
     student_id: UUID
+    section_id: UUID | None
     file_url: str
-    generated_at: date | None
+    generated_at: dt_date | None
 
     model_config = {"from_attributes": True}

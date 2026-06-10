@@ -65,7 +65,7 @@ class QueryScoper:
 
     @staticmethod
     def for_students(db, current_user: dict) -> Optional[BinaryExpression]:
-        from app.modules.academic.models import TeacherAssignment
+        from app.modules.academic.models import Enrollment, TeacherAssignment
         from app.modules.auth.models import StudentProfile
         from app.modules.parent.models import ParentStudentLink
 
@@ -76,30 +76,58 @@ class QueryScoper:
             return None
 
         if role == "teacher":
+            from sqlalchemy import and_, or_
+            from app.modules.academic.models import Section
             ta = TeacherAssignment.__table__.alias()
             ta_subq = (
                 select(ta.c.section_id)
                 .where(ta.c.instructor_id == uid)
                 .subquery()
             )
-            return StudentProfile.section_id.in_(ta_subq)
+            sec = Section.__table__.alias()
+            ct_subq = (
+                select(sec.c.id)
+                .where(sec.c.class_teacher_id == uid)
+                .subquery()
+            )
+            enrollment = Enrollment.__table__.alias()
+            return and_(
+                StudentProfile.id == enrollment.c.student_id,
+                or_(
+                    enrollment.c.section_id.in_(ta_subq),
+                    enrollment.c.section_id.in_(ct_subq)
+                ),
+                enrollment.c.status == "ACTIVE",
+            )
 
         if role == "student":
+            from sqlalchemy import and_
+            enrollment = Enrollment.__table__.alias()
             sp_subq = (
                 select(StudentProfile.id)
                 .where(StudentProfile.user_id == uid)
                 .scalar_subquery()
             )
-            return StudentProfile.id == sp_subq
+            return and_(
+                StudentProfile.id == sp_subq,
+                StudentProfile.id == enrollment.c.student_id,
+                enrollment.c.status == "ACTIVE",
+            )
 
         if role == "parent":
+            from sqlalchemy import and_
+            enrollment = Enrollment.__table__.alias()
             psl = ParentStudentLink.__table__.alias()
             child_subq = (
                 select(psl.c.student_id)
                 .where(psl.c.parent_id == uid)
                 .subquery()
             )
-            return StudentProfile.id.in_(child_subq)
+            return and_(
+                StudentProfile.id.in_(child_subq),
+                StudentProfile.id == enrollment.c.student_id,
+                enrollment.c.status == "ACTIVE",
+            )
 
         return None
 
@@ -117,15 +145,31 @@ class QueryScoper:
             return None
 
         if role == "teacher":
+            from sqlalchemy import or_
+            from app.modules.academic.models import Enrollment, Section
             ta = TeacherAssignment.__table__.alias()
-            section_ids = (
+            ta_subq = (
                 select(ta.c.section_id)
                 .where(ta.c.instructor_id == uid)
                 .subquery()
             )
+            sec = Section.__table__.alias()
+            ct_subq = (
+                select(sec.c.id)
+                .where(sec.c.class_teacher_id == uid)
+                .subquery()
+            )
+            enrollment = Enrollment.__table__.alias()
             student_ids = (
                 select(StudentProfile.id)
-                .where(StudentProfile.section_id.in_(section_ids))
+                .where(
+                    StudentProfile.id == enrollment.c.student_id,
+                    or_(
+                        enrollment.c.section_id.in_(ta_subq),
+                        enrollment.c.section_id.in_(ct_subq)
+                    ),
+                    enrollment.c.status == "ACTIVE",
+                )
                 .subquery()
             )
             return Attendance.student_id.in_(student_ids)
@@ -163,15 +207,21 @@ class QueryScoper:
             return None
 
         if role == "teacher":
+            from app.modules.academic.models import Enrollment
             ta = TeacherAssignment.__table__.alias()
             section_ids = (
                 select(ta.c.section_id)
                 .where(ta.c.instructor_id == uid)
                 .subquery()
             )
+            enrollment = Enrollment.__table__.alias()
             student_ids = (
                 select(StudentProfile.id)
-                .where(StudentProfile.section_id.in_(section_ids))
+                .where(
+                    StudentProfile.id == enrollment.c.student_id,
+                    enrollment.c.section_id.in_(section_ids),
+                    enrollment.c.status == "ACTIVE",
+                )
                 .subquery()
             )
             return LeaveApplication.student_id.in_(student_ids)
@@ -209,42 +259,48 @@ class QueryScoper:
             return None
 
         if role == "teacher":
-            ta = TeacherAssignment.__table__.alias()
-            section_ids = (
-                select(ta.c.section_id)
-                .where(ta.c.instructor_id == uid)
-                .subquery()
+            from app.modules.auth.models import StaffProfile
+            sp = (
+                select(StaffProfile.id)
+                .where(StaffProfile.user_id == uid)
+                .scalar_subquery()
             )
-            section_names = (
-                select(Section.name)
-                .where(Section.id.in_(section_ids))
-                .subquery()
-            )
-            return HomeworkAssignment.student_group.in_(section_names)
+            return HomeworkAssignment.created_by_id == sp
 
         if role == "student":
-            sp = (
-                select(StudentProfile.section_id)
-                .where(StudentProfile.user_id == uid)
+            from app.modules.academic.models import Enrollment
+            enrollment = Enrollment.__table__.alias()
+            sp_enrollment = (
+                select(enrollment.c.section_id)
+                .where(
+                    StudentProfile.user_id == uid,
+                    StudentProfile.id == enrollment.c.student_id,
+                    enrollment.c.status == "ACTIVE",
+                )
                 .scalar_subquery()
             )
             section_name = (
                 select(Section.name)
-                .where(Section.id == sp)
+                .where(Section.id == sp_enrollment)
                 .scalar_subquery()
             )
             return HomeworkAssignment.student_group == section_name
 
         if role == "parent":
+            from app.modules.academic.models import Enrollment
             psl = ParentStudentLink.__table__.alias()
+            enrollment = Enrollment.__table__.alias()
             child_ids = (
                 select(psl.c.student_id)
                 .where(psl.c.parent_id == uid)
                 .subquery()
             )
             child_section_ids = (
-                select(StudentProfile.section_id)
-                .where(StudentProfile.id.in_(child_ids))
+                select(enrollment.c.section_id)
+                .where(
+                    enrollment.c.student_id.in_(child_ids),
+                    enrollment.c.status == "ACTIVE",
+                )
                 .subquery()
             )
             section_names = (
@@ -270,34 +326,33 @@ class QueryScoper:
             return None
 
         if role == "teacher":
-            from sqlalchemy import or_
-            ta = TeacherAssignment.__table__.alias()
-            section_ids = (
-                select(ta.c.section_id)
-                .where(ta.c.instructor_id == uid)
-                .subquery()
-            )
-            return or_(
-                TimetableSlot.teacher_id == uid,
-                TimetableSlot.section_id.in_(section_ids),
-            )
+            return TimetableSlot.teacher_id == uid
 
         if role == "student":
-            sp = (
-                select(StudentProfile.section_id)
-                .where(StudentProfile.user_id == uid)
+            from app.modules.academic.models import Enrollment
+            enrollment = Enrollment.__table__.alias()
+            sec = (
+                select(enrollment.c.section_id)
+                .where(
+                    StudentProfile.user_id == uid,
+                    StudentProfile.id == enrollment.c.student_id,
+                    enrollment.c.status == "ACTIVE",
+                )
                 .scalar_subquery()
             )
-            return TimetableSlot.section_id == sp
+            return TimetableSlot.section_id == sec
 
         if role == "parent":
+            from app.modules.academic.models import Enrollment
             psl = ParentStudentLink.__table__.alias()
+            enrollment = Enrollment.__table__.alias()
             child_section_ids = (
-                select(StudentProfile.section_id)
+                select(enrollment.c.section_id)
                 .where(
-                    StudentProfile.id.in_(
+                    enrollment.c.student_id.in_(
                         select(psl.c.student_id).where(psl.c.parent_id == uid).subquery()
-                    )
+                    ),
+                    enrollment.c.status == "ACTIVE",
                 )
                 .subquery()
             )
@@ -326,13 +381,23 @@ class QueryScoper:
             return Invoice.student_id == sp
 
         if role == "parent":
+            from app.modules.academic.models import Enrollment
+            enrollment = Enrollment.__table__.alias()
             psl = ParentStudentLink.__table__.alias()
             child_ids = (
                 select(psl.c.student_id)
                 .where(psl.c.parent_id == uid)
                 .subquery()
             )
-            return Invoice.student_id.in_(child_ids)
+            active_enrolled_ids = (
+                select(enrollment.c.student_id)
+                .where(
+                    enrollment.c.student_id.in_(child_ids),
+                    enrollment.c.status == "ACTIVE",
+                )
+                .subquery()
+            )
+            return Invoice.student_id.in_(active_enrolled_ids)
 
         return None
 

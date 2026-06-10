@@ -25,6 +25,8 @@ export default function Students() {
   const [showAddSection, setShowAddSection]     = useState(false);
   const [newStandardName, setNewStandardName]   = useState('');
   const [newSectionName, setNewSectionName]     = useState('');
+  const [newSectionTeacherId, setNewSectionTeacherId] = useState('');
+  const [editSection, setEditSection]           = useState(null);
   const [savingStructure, setSavingStructure]   = useState(false);
 
   // Navigation
@@ -51,10 +53,33 @@ export default function Students() {
   };
   const [formData, setFormData] = useState(emptyForm);
 
-  // Fetch all Programs (standards) so admins see them even without groups
-  const { data: allPrograms = [], isLoading: loadingPrograms } = useFrappeList(
-    'Program', [], ['name', 'program_name'], 200
-  );
+  // Fetch all Programs (standards) natively
+  const { data: rawClassesData = {}, isLoading: loadingPrograms } = useQuery({
+    queryKey: ['academic-classes'],
+    queryFn: async () => {
+      const res = await client.get('/academic/classes');
+      return res.data;
+    }
+  });
+  const rawClasses = Array.isArray(rawClassesData) ? rawClassesData : (rawClassesData.data || []);
+
+  const { data: rawSectionsData = {}, isLoading: loadingSectionsData } = useQuery({
+    queryKey: ['academic-sections'],
+    queryFn: async () => {
+      const res = await client.get('/academic/sections');
+      return res.data;
+    }
+  });
+  const rawSections = Array.isArray(rawSectionsData) ? rawSectionsData : (rawSectionsData.data || []);
+
+  const { data: instructorsData = {}, isLoading: loadingInstructors } = useQuery({
+    queryKey: ['staff-instructors'],
+    queryFn: async () => {
+      const res = await client.get('/academic/instructors');
+      return res.data;
+    }
+  });
+  const instructors = Array.isArray(instructorsData) ? instructorsData : (instructorsData.data || []);
 
   useEffect(() => {
     const sectionParam = searchParams.get('section');
@@ -68,54 +93,111 @@ export default function Students() {
     }
   }, [searchParams, yearGroups, view]);
 
-  // For admins: show ALL programs with section count from yearGroups
-  // For teachers: show only their assigned program
-  const standards = roleCheck.isTeacher(user)
-    ? (user.mySection ? [{ name: user.mySection.program, label: user.mySection.program, count: 1 }] : [])
-    : allPrograms.map(p => ({
-        name: p.program_name || p.name,
-        label: p.program_name || p.name,
-        count: yearGroups.filter(sg => sg.program === (p.program_name || p.name)).length,
-      }));
-  const loadingStandards = loadingPrograms;
+  const { data: teachingProfile, isLoading: loadingTeachingProfile } = useQuery({
+    queryKey: ['my-teaching-profile'],
+    queryFn: async () => {
+      const res = await client.get('/academic/my-teaching-profile');
+      return res.data;
+    },
+    enabled: roleCheck.isTeacher(user),
+  });
 
-  // Derive sections from shared yearGroups
+  const teacherClasses = Array.from(
+    (teachingProfile?.assignments || []).reduce((acc, a) => {
+      if (!acc.has(a.class_id)) {
+        acc.set(a.class_id, { name: a.class_name, label: a.class_name, count: new Set() });
+      }
+      acc.get(a.class_id).count.add(a.section_id);
+      return acc;
+    }, new Map()).values()
+  ).map(c => ({ ...c, count: c.count.size }));
+
+  const teacherSections = selectedStandard ? Array.from(
+    (teachingProfile?.assignments || [])
+      .filter(a => a.class_name === selectedStandard.name)
+      .reduce((acc, a) => {
+        if (!acc.has(a.section_id)) {
+          acc.set(a.section_id, {
+            name: a.section_id,
+            label: a.section_name,
+            program: a.class_name,
+            student_group_name: a.section_name,
+            teacher: null,
+            teacherId: null,
+          });
+        }
+        return acc;
+      }, new Map()).values()
+  ) : [];
+
+  useEffect(() => {
+    if (roleCheck.isTeacher(user) && teachingProfile?.assignments) {
+      const uniqueSections = new Map();
+      teachingProfile.assignments.forEach(a => {
+        uniqueSections.set(a.section_id, a);
+      });
+      if (uniqueSections.size === 1 && view === 'standards' && !selectedStandard && !selectedSection) {
+        const singleAssignment = Array.from(uniqueSections.values())[0];
+        setSelectedStandard({ name: singleAssignment.class_name, label: singleAssignment.class_name });
+        setSelectedSection({
+          name: singleAssignment.section_id,
+          label: singleAssignment.section_name,
+          program: singleAssignment.class_name,
+          student_group_name: singleAssignment.section_name
+        });
+        setView('students');
+      }
+    }
+  }, [teachingProfile, user, view, selectedStandard, selectedSection]);
+
+  // For admins: show ALL programs with section count
+  const standards = roleCheck.isTeacher(user)
+    ? teacherClasses
+    : rawClasses.map(p => ({
+        id: p.id,
+        name: p.name || p.id,
+        label: p.name,
+        count: rawSections.filter(sg => sg.class_id === p.id).length,
+      }));
+  const loadingStandards = loadingPrograms || loadingTeachingProfile;
+
+  // Derive sections
   const sections = !selectedStandard
     ? []
     : roleCheck.isTeacher(user)
-      ? (user.mySection && user.mySection.program === selectedStandard.name
-          ? [{ ...user.mySection, label: user.mySection.student_group_name?.split(' - ')[1] || user.mySection.name, teacher: null }]
-          : [])
-      : yearGroups.filter(g => g.program === selectedStandard.name).map(s => ({
+      ? teacherSections
+      : rawSections.filter(s => s.class_id === selectedStandard.id || s.class_id === selectedStandard.name || s.program === selectedStandard.name).map(s => ({
           ...s,
-          label: s.student_group_name?.split(' - ')[1] || s.name,
-          teacher: s.class_teacher || s.instructors?.[0]?.instructor_name || null,
-          teacherId: s.class_teacher || null,
+          id: s.id || s.name,
+          label: s.name,
+          teacher: instructors.find(i => i.user_id === s.class_teacher_id) ? `${instructors.find(i => i.user_id === s.class_teacher_id).first_name} ${instructors.find(i => i.user_id === s.class_teacher_id).last_name || ''}` : s.class_teacher_id || null,
+          teacherId: s.class_teacher_id || null,
         }));
-  const loadingSections = false;
+  const loadingSections = loadingSectionsData;
 
   // Fetch students
   const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
-    queryKey: ['Student', 'students', selectedSection?.name, studentPage, search],
+    queryKey: ['Student', 'students', selectedSection?.id || selectedSection?.name, studentPage, search],
     queryFn: async () => {
-      if (!selectedSection?.name) {
-        console.warn('[Students] queryFn skipped: selectedSection?.name is', selectedSection?.name, 'selectedSection is', selectedSection);
+      const sectionIdToUse = selectedSection?.id || selectedSection?.name;
+      if (!sectionIdToUse) {
+        console.warn('[Students] queryFn skipped: no section ID');
         return { data: [], total: 0, total_pages: 1 };
       }
 
       const params = new URLSearchParams({
-        section_id: selectedSection.name,
+        section_id: sectionIdToUse,
         page: String(studentPage),
         per_page: String(STUDENTS_PER_PAGE),
       });
       if (search) params.set('search', search);
 
-      console.log('[Students] queryFn firing with params:', params.toString(), 'section:', selectedSection.name);
+      console.log('[Students] queryFn firing with params:', params.toString(), 'section:', sectionIdToUse);
       const res = await client.get(`/academic/students?${params}`);
       console.log('[Students] queryFn got response:', res.data);
       return res.data;
     },
-    enabled: !!selectedSection?.name,
+    enabled: !!(selectedSection?.id || selectedSection?.name),
   });
 
   const students = studentsData?.data || [];
@@ -123,23 +205,32 @@ export default function Students() {
 
   // Mutations
   const createStandardMutation = useMutation({
-    mutationFn: (name) => createDoc('Program', { program_name: name }),
+    mutationFn: (name) => client.post('/academic/classes', { name, order: 10 }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['Student', 'standards'] });
+      queryClient.invalidateQueries({ queryKey: ['academic-classes'] });
       setShowAddStandard(false); setNewStandardName('');
     },
   });
 
   const createSectionMutation = useMutation({
-    mutationFn: (name) => createDoc('Student Group', {
-      student_group_name: `${selectedStandard.name} - ${name}`,
-      program: selectedStandard.name,
-      group_based_on: 'Batch',
-      academic_year: selectedYear || settings?.academic_year || '',
+    mutationFn: (name) => client.post('/academic/sections', {
+      class_id: selectedStandard.id || selectedStandard.name,
+      name: name,
+      capacity: 40,
+      academic_year_id: selectedYear || settings?.academic_year || '00000000-0000-0000-0000-000000000000',
+      class_teacher_id: newSectionTeacherId || null,
     }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['Student Group', 'list'] });
-      setShowAddSection(false); setNewSectionName('');
+      queryClient.invalidateQueries({ queryKey: ['academic-sections'] });
+      setShowAddSection(false); setNewSectionName(''); setNewSectionTeacherId('');
+    },
+  });
+
+  const updateSectionMutation = useMutation({
+    mutationFn: ({ sectionId, data }) => client.patch(`/academic/sections/${sectionId}`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['academic-sections'] });
+      setEditSection(null);
     },
   });
 
@@ -404,8 +495,8 @@ export default function Students() {
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
               {sections.map((sec) => (
-                <button key={sec.name} onClick={() => goToStudents({ ...sec, label: sec.label || sec.name })}
-                  className="card flex flex-col items-center justify-center gap-3 p-6 hover:shadow-md hover:border-[#2ED05D] border-2 border-transparent transition-all cursor-pointer group text-center">
+                <div key={sec.name} onClick={() => goToStudents({ ...sec, label: sec.label || sec.name })}
+                  className="card relative flex flex-col items-center justify-center gap-3 p-6 hover:shadow-md hover:border-[#2ED05D] border-2 border-transparent transition-all cursor-pointer group text-center">
                   <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110"
                     style={{ background: 'rgba(99,102,241,0.1)' }}>
                     <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
@@ -415,7 +506,7 @@ export default function Students() {
                   </div>
                   <div>
                     <p className="font-semibold text-[var(--color-text)] text-sm">{sec.label || sec.name}</p>
-                    {sec.teacher && (
+                    {sec.teacher ? (
                       <p 
                         onClick={(e) => {
                           if (sec.teacherId) {
@@ -427,9 +518,18 @@ export default function Students() {
                       >
                         {sec.teacher}
                       </p>
+                    ) : (
+                      <p className="text-[11px] font-medium text-gray-400 mt-1">No Teacher</p>
                     )}
                   </div>
-                </button>
+                  {roleCheck.canManageSections(user) && (
+                    <button onClick={(e) => { e.stopPropagation(); setEditSection(sec); }} className="absolute top-2 right-2 p-1.5 hover:bg-gray-100 rounded-lg transition-colors group z-10" title="Edit Section">
+                      <svg className="w-4 h-4 text-gray-400 group-hover:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           )}
@@ -605,11 +705,63 @@ export default function Students() {
                 <input type="text" value={newSectionName} onChange={(e) => setNewSectionName(e.target.value)}
                   placeholder="e.g. Section A" className="input" required autoFocus />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                  Class Teacher (Optional)
+                </label>
+                <select value={newSectionTeacherId} onChange={(e) => setNewSectionTeacherId(e.target.value)} className="input">
+                  <option value="">No Teacher</option>
+                  {instructors.map(i => (
+                    <option key={i.id} value={i.user_id}>{i.first_name} {i.last_name || ''}</option>
+                  ))}
+                </select>
+              </div>
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button type="button" onClick={() => { setShowAddSection(false); setNewSectionName(''); }} className="btn-secondary">Cancel</button>
                 <button type="submit" disabled={createSectionMutation.isPending} className="btn-primary flex items-center gap-2 disabled:opacity-50">
                   {createSectionMutation.isPending && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
                   Add Section
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Section Modal */}
+      {editSection && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-[var(--color-text)]">Edit Section</h2>
+                <p className="text-sm text-[var(--color-text-secondary)] mt-1">{editSection.label}</p>
+              </div>
+              <button onClick={() => setEditSection(null)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors cursor-pointer group">
+                <span className="w-6 h-6 rounded-full bg-black/5 flex items-center justify-center transition-all duration-300 group-hover:bg-black/10 group-hover:translate-x-0.5 group-hover:-translate-y-[1px] group-hover:scale-105">
+                  <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </span>
+              </button>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); updateSectionMutation.mutate({ sectionId: editSection.id || editSection.name, data: { class_teacher_id: editSection.teacherId || null } }); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                  Class Teacher (Optional)
+                </label>
+                <select value={editSection.teacherId || ''} onChange={(e) => setEditSection({ ...editSection, teacherId: e.target.value })} className="input">
+                  <option value="">No Teacher</option>
+                  {instructors.map(i => (
+                    <option key={i.id} value={i.user_id}>{i.first_name} {i.last_name || ''}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditSection(null)} className="btn-secondary">Cancel</button>
+                <button type="submit" disabled={updateSectionMutation.isPending} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+                  {updateSectionMutation.isPending && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
+                  Save Changes
                 </button>
               </div>
             </form>

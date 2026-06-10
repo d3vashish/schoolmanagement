@@ -29,6 +29,7 @@ from app.modules.fees.schemas import (
     FeeInstallmentResponse,
     FeeStructureCreate,
     FeeStructureResponse,
+    InvoiceCreate,
     InvoiceResponse,
     PaymentOrderResponse,
     StudentDiscountCreate,
@@ -179,6 +180,14 @@ async def list_invoices(
         q = q.where(Invoice.student_id == student_id)
     result = await db.execute(q)
     return result.scalars().all()
+
+
+@router.post("/invoices", response_model=InvoiceResponse, dependencies=admin_only)
+async def create_invoice(body: InvoiceCreate, db: AsyncSession = Depends(get_db)):
+    invoice = Invoice(**body.model_dump())
+    db.add(invoice)
+    await db.flush()
+    return invoice
 
 
 @router.post("/invoices/bulk-generate", dependencies=admin_only)

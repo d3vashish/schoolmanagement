@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -21,5 +22,7 @@ class TimetableSlotResponse(BaseModel):
     period_no: int
     academic_year_id: UUID
     is_published: bool
+    teacher_name: Optional[str] = None
+    subject_name: Optional[str] = None
 
     model_config = {"from_attributes": True}

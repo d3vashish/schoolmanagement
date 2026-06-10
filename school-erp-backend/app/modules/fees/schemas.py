@@ -75,9 +75,22 @@ class StudentDiscountResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class InvoiceCreate(BaseModel):
+    student_id: str
+    installment_id: str
+    gross_amount: Decimal
+    discount_amount: Decimal = Decimal("0")
+    net_amount: Decimal
+    due_date: date
+    section_id: str | None = None
+    academic_year_id: str | None = None
+
+
 class InvoiceResponse(BaseModel):
     id: UUID
     student_id: UUID
+    section_id: UUID | None = None
+    academic_year_id: UUID | None = None
     installment_id: UUID
     gross_amount: Decimal
     discount_amount: Decimal

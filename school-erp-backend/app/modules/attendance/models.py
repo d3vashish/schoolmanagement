@@ -13,6 +13,9 @@ class Attendance(Base, TimestampMixin):
     period_no = Column(Integer, nullable=True)
     status = Column(String(10), nullable=False)
     marked_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
+    subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id", ondelete="SET NULL"), nullable=True, index=True)
+    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="SET NULL"), nullable=True, index=True)
     is_corrected = Column(Boolean, default=False, nullable=False)
     corrected_by = Column(UUID(as_uuid=True), nullable=True)
 

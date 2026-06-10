@@ -11,7 +11,7 @@ export function isAdmin(user) {
 }
 
 export function isTeacher(user) {
-  return user?.roles?.includes('teacher');
+  return user?.roles?.some(r => r.toLowerCase() === 'teacher' || r.toLowerCase() === 'instructor');
 }
 
 export function isLibrarian(user) {

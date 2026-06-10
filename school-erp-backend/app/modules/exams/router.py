@@ -18,6 +18,8 @@ from app.modules.exams.schemas import (
     ExamCreate,
     ExamResponse,
     ExamResultResponse,
+    ExamSubjectCreate,
+    ExamSubjectResponse,
     GradingSchemeCreate,
     GradingSchemeResponse,
     MarksEntry,
@@ -68,15 +70,31 @@ async def create_exam(body: ExamCreate, db: AsyncSession = Depends(get_db)):
 @router.post("/{exam_id}/subjects", dependencies=hod_admin)
 async def add_exam_subject(
     exam_id: str,
-    subject_id: str,
-    max_marks: float = Query(...),
-    date: str | None = None,
+    body: ExamSubjectCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    es = ExamSubject(exam_id=exam_id, subject_id=subject_id, max_marks=max_marks, date=date)
+    es = ExamSubject(exam_id=exam_id, subject_id=body.subject_id, max_marks=body.max_marks, date=body.date)
     db.add(es)
     await db.flush()
     return {"ok": True}
+
+
+@router.get("/{exam_id}/subjects", response_model=list[ExamSubjectResponse], dependencies=all_auth)
+async def get_exam_subjects(exam_id: str, db: AsyncSession = Depends(get_db)):
+    from app.modules.academic.models import Subject
+    result = await db.execute(
+        select(ExamSubject, Subject.name.label("subject_name"))
+        .join(Subject, ExamSubject.subject_id == Subject.id)
+        .where(ExamSubject.exam_id == exam_id)
+    )
+    
+    subjects = []
+    for es, subject_name in result.all():
+        data = es.__dict__.copy()
+        data["subject_name"] = subject_name
+        subjects.append(data)
+    
+    return subjects
 
 
 @router.post("/{exam_id}/results/bulk", dependencies=teacher_admin)
@@ -144,11 +162,32 @@ async def publish_results(exam_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/{exam_id}/results", response_model=list[ExamResultResponse], dependencies=all_auth)
 async def get_results(exam_id: str, student_id: str | None = None, db: AsyncSession = Depends(get_db)):
-    q = select(ExamResult).where(ExamResult.exam_id == exam_id)
+    from app.modules.academic.models import Subject
+    from app.modules.students.models import StudentProfile
+    
+    q = (
+        select(
+            ExamResult,
+            StudentProfile.first_name,
+            StudentProfile.last_name,
+            Subject.name.label("subject_name"),
+        )
+        .join(StudentProfile, ExamResult.student_id == StudentProfile.id)
+        .join(Subject, ExamResult.subject_id == Subject.id)
+        .where(ExamResult.exam_id == exam_id)
+    )
     if student_id:
         q = q.where(ExamResult.student_id == student_id)
     result = await db.execute(q)
-    return result.scalars().all()
+    
+    results_out = []
+    for er, fname, lname, sname in result.all():
+        data = er.__dict__.copy()
+        data["student_name"] = f"{fname} {lname}".strip()
+        data["subject_name"] = sname
+        results_out.append(data)
+        
+    return results_out
 
 
 @router.get("/{exam_id}/aggregates", response_model=list[AggregateResponse], dependencies=all_auth)

@@ -1,7 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList } from '../api/frappe';
+import { getList, client } from '../api/frappe';
 import { useQuery } from '@tanstack/react-query';
 
 const hexToRgba = (hex, alpha) => {
@@ -33,13 +33,14 @@ const gradientKPIs = [
 ];
 
 const TEACHER_GRADIENT_KPIS = [
-  { key: 'myStudentCount', label: 'My Students', gradient: 'linear-gradient(135deg, #8EDFD2, #7ED7C9)', icon: ICONS.students },
-  { key: 'attendancePct', label: "Today's Attendance", gradient: 'linear-gradient(135deg, #C9A4F5, #B48DEB)', icon: ICONS.check, suffix: '%' },
-  { key: 'mySections', label: 'My Classes', gradient: 'linear-gradient(135deg, #F5D98B, #F0CF74)', icon: ICONS.programs },
-  { key: 'periodsToday', label: 'Periods Today', gradient: 'linear-gradient(135deg, #F58E92, #EF767B)', icon: ICONS.calendar },
+  { key: 'myClasses', label: 'My Classes', gradient: 'linear-gradient(135deg, #8EDFD2, #7ED7C9)', icon: ICONS.programs },
+  { key: 'mySections', label: 'My Sections', gradient: 'linear-gradient(135deg, #C9A4F5, #B48DEB)', icon: ICONS.users },
+  { key: 'mySubjects', label: 'My Subjects', gradient: 'linear-gradient(135deg, #F5D98B, #F0CF74)', icon: ICONS.courses },
+  { key: 'myAssignments', label: 'Total Assignments', gradient: 'linear-gradient(135deg, #F58E92, #EF767B)', icon: ICONS.check },
 ];
 
 const CLASS_COLORS = ['#2ED3C5', '#203B70', '#FF8A3D', '#22C55E', '#4F7CFF', '#A855F7', '#F59E0B'];
+const SCHEDULE_COLORS = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4'];
 
 function GradientKPICard({ label, value, loading, gradient, icon, styleDelay, suffix }) {
   return (
@@ -157,44 +158,13 @@ const fetchAdminData = async ({ yearStartDate, yearEndDate } = {}) => {
   return { stats, attendanceData, attendanceRate, recentActivity, classDistribution, todaySchedules: todaySchedules || [], courseNames };
 };
 
-const fetchTeacherData = async (user) => {
-  const teacherGroupNames = [...new Set([user.myGroupName, ...(user.mySubjectGroups || [])].filter(Boolean))];
-  if (teacherGroupNames.length === 0 && !user.instructorId) return null;
-
-  const today = new Date().toISOString().split('T')[0];
-
-  const groupFilters = teacherGroupNames.length > 0 ? [['name', 'in', teacherGroupNames]] : [];
-  const attFilters = teacherGroupNames.length > 0
-    ? [['student_group', 'in', teacherGroupNames], ['date', '=', today]]
-    : [['date', '=', 'none']];
-
-  const [groups, todayAttendance, todayScheduleData] = await Promise.all([
-    teacherGroupNames.length > 0
-      ? getList('Student Group', groupFilters, ['name', 'student_group_name', 'students'], 100)
-      : Promise.resolve([]),
-    getList('Student Attendance', attFilters, ['status', 'student_group'], 500).catch(() => []),
-    user.instructorId
-      ? getList('Course Schedule', [['instructor', '=', user.instructorId], ['schedule_date', '=', today]], ['course', 'student_group', 'from_time', 'to_time', 'room'], 50)
-      : Promise.resolve([]),
-  ]);
-
-  const myStudentCount = groups.reduce((sum, g) => {
-    return sum + (g.students?.filter(s => s.active).length ?? 0);
-  }, 0);
-
-  const presentCount = (todayAttendance || []).filter(a => a.status === 'Present').length;
-  const attendancePct = myStudentCount > 0 ? Math.round((presentCount / myStudentCount) * 100) : 0;
-
-  const teacherStats = { myStudentCount, attendancePct, mySections: groups.length, periodsToday: todayScheduleData.length };
-
-  const courseNames = {};
-  const courseIds = [...new Set(todayScheduleData.map(s => s.course).filter(Boolean))];
-  if (courseIds.length > 0) {
-    const courses = await getList('Course', [['name', 'in', courseIds]], ['name', 'course_name'], courseIds.length);
-    courses.forEach(c => { courseNames[c.name] = c.course_name || c.name; });
+const fetchTeacherData = async () => {
+  try {
+    const res = await client.get('/academic/my-teaching-profile');
+    return res.data;
+  } catch {
+    return { assignments: [], summary: { total_classes: 0, total_sections: 0, total_subjects: 0, total_assignments: 0 } };
   }
-
-  return { teacherStats, todaySchedule: todayScheduleData, courseNames };
 };
 
 export default function Dashboard() {
@@ -214,8 +184,8 @@ export default function Dashboard() {
   });
 
   const { data: teacherData, isLoading: teacherLoading, refetch: refetchTeacher } = useQuery({
-    queryKey: ['Dashboard', 'teacher', user?.name, selectedYear, user?.myGroupName, ...(user?.mySubjectGroups || [])],
-    queryFn: () => fetchTeacherData(user),
+    queryKey: ['Dashboard', 'teacher', user?.email],
+    queryFn: fetchTeacherData,
     enabled: isTeacher,
   });
 
@@ -279,9 +249,15 @@ export default function Dashboard() {
   const attendanceRate = adminData?.attendanceRate || 0;
   const recentActivity = adminData?.recentActivity || [];
   const classDistribution = adminData?.classDistribution || [];
-  const teacherStats = teacherData?.teacherStats || { myStudentCount: 0, attendancePct: 0, mySections: 0, periodsToday: 0 };
-  const todaySchedule = isTeacher ? (teacherData?.todaySchedule || []) : (adminData?.todaySchedules || []);
-  const courseNames = isTeacher ? (teacherData?.courseNames || {}) : (adminData?.courseNames || {});
+  const teacherProfile = teacherData || { assignments: [], summary: {} };
+  const teacherStats = {
+    myClasses: teacherProfile.summary?.total_classes || 0,
+    mySections: teacherProfile.summary?.total_sections || 0,
+    mySubjects: teacherProfile.summary?.total_subjects || 0,
+    myAssignments: teacherProfile.summary?.total_assignments || 0,
+  };
+  const todaySchedule = adminData?.todaySchedules || [];
+  const courseNames = adminData?.courseNames || {};
 
   const getGreeting = () => {
     const h = new Date().getHours();
@@ -417,73 +393,88 @@ export default function Dashboard() {
           )}
         </div>
       ) : isTeacher ? (
-        !user.mySection ? (
-          <div className="card flex flex-col items-center justify-center py-20 text-center animate-in relative" style={{ animationDelay: '60ms' }}>
-            <div className="absolute -top-1 left-1/4 w-4 h-4 rounded-full bg-[#FFD93D]/30 animate-float" />
-            <div className="absolute bottom-8 right-6 w-5 h-5 rounded-full bg-[#FF6B9D]/20 animate-float-delayed" />
-            <div className="w-16 h-16 rounded-full bg-[#E8F9ED] flex items-center justify-center mb-4 animate-wiggle" style={{ transformOrigin: 'center' }}>
-              <svg className="w-7 h-7 text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={ICONS.users} />
-              </svg>
-            </div>
-            <h3 className="text-lg font-semibold text-[#1F2A44] mb-1">No class assigned yet <span>📚</span></h3>
-            <p className="text-sm text-[#475569]">Contact admin to get assigned to a class.</p>
+        <>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+            {TEACHER_GRADIENT_KPIS.map((c, i) => (
+              <GradientKPICard key={c.key} label={c.label} value={teacherStats[c.key]} loading={loading} gradient={c.gradient} icon={c.icon} styleDelay={60 + i * 50} suffix={c.suffix} />
+            ))}
           </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-              {TEACHER_GRADIENT_KPIS.map((c, i) => (
-                <GradientKPICard key={c.key} label={c.label} value={teacherStats[c.key]} loading={loading} gradient={c.gradient} icon={c.icon} styleDelay={60 + i * 50} suffix={c.suffix} />
-              ))}
-            </div>
 
-            <div className="card animate-in relative" style={{ animationDelay: '120ms' }}>
-              <div className="absolute -top-1 right-10 w-3 h-3 rounded-full bg-[#4D96FF]/30 animate-float" />
-              <div className="absolute bottom-6 left-4 w-4 h-4 rounded-full bg-[#FFD93D]/20 animate-float-delayed" />
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-bold text-[#1F2A44]">Today's Schedule</h2>
-                  <p className="text-xs text-[#475569] mt-0.5">My classes for today</p>
-                </div>
-                <a href="/timetable" className="text-xs font-semibold text-[#2ED05D] hover:text-[#25B04E] transition-colors">View full →</a>
+          {/* My Teaching Assignments */}
+          <div className="card animate-in relative" style={{ animationDelay: '120ms' }}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-sm font-bold text-[#1F2A44]">My Teaching Assignments</h2>
+                <p className="text-xs text-[#475569] mt-0.5">Classes, sections, and subjects assigned to you</p>
               </div>
-              {loading ? (
-                <div className="space-y-3">
-                  {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-xl bg-gray-50 animate-pulse" />)}
-                </div>
-              ) : todaySchedule.length === 0 ? (
-                <div className="py-8 text-center">
-                  <p className="text-sm text-[#475569]">No periods scheduled for today.</p>
-                </div>
-              ) : (
-                <div className="space-y-2.5">
-                  {todaySchedule.map((s, i) => {
-                    const color = SCHEDULE_COLORS[i % SCHEDULE_COLORS.length];
-                    return (
-                      <div key={s.name || i} className="flex items-center gap-4 px-4 py-3 rounded-2xl transition-all duration-200 animate-in hover:translate-x-1"
-                        style={{ animationDelay: `${160 + i * 40}ms`, backgroundColor: hexToRgba(color, 0.06) }}>
-                        <div className="flex items-center gap-3 min-w-[72px]">
-                          <div className="w-1.5 h-10 rounded-full" style={{ background: color }} />
-                          <div>
-                            <p className="text-xs font-bold leading-none" style={{ color }}>{s.from_time?.substring(0, 5)}</p>
-                            <p className="text-[10px] text-[#94A3B8] mt-0.5">{s.to_time?.substring(0, 5)}</p>
-                          </div>
-                        </div>
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white flex-shrink-0" style={{ background: color }}>
-                          {(courseNames[s.course] || s.course || '?')[0].toUpperCase()}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-[#1F2A44]">{courseNames[s.course] || s.course || '—'}</p>
-                          <p className="text-xs text-[#475569]">{s.student_group}{s.room ? ` · Room ${s.room}` : ''}</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
-          </>
-        )
+            {loading ? (
+              <div className="space-y-3">
+                {[1, 2, 3].map(i => <div key={i} className="h-14 rounded-xl bg-gray-50 animate-pulse" />)}
+              </div>
+            ) : teacherProfile.assignments.length === 0 ? (
+              <div className="py-12 text-center">
+                <div className="w-16 h-16 rounded-full bg-[#E8F9ED] flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-7 h-7 text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={ICONS.users} />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-semibold text-[#1F2A44] mb-1">No assignments yet 📚</h3>
+                <p className="text-sm text-[#475569]">Contact your principal to get assigned to classes.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-100">
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">Class</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">Section</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-[#94A3B8] uppercase tracking-wider">Subject</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teacherProfile.assignments.map((a, i) => {
+                      const colors = ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b', '#ec4899', '#06b6d4'];
+                      const color = colors[(a.class_order || i) % colors.length];
+                      return (
+                        <tr key={a.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold" style={{ background: color }}>
+                                {a.class_name?.substring(0, 2)}
+                              </div>
+                              <span className="text-sm font-medium text-[#1F2A44]">Class {a.class_name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold">
+                              Section {a.section_name}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-sm text-[#1F2A44] font-medium">{a.subject_name}</span>
+                            <span className="text-xs text-[#94A3B8] ml-1.5">({a.subject_code})</span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Actions for Teacher */}
+          <div className="card animate-in relative" style={{ animationDelay: '180ms' }}>
+            <h2 className="text-sm font-bold text-[#1F2A44] mb-3">Quick Actions</h2>
+            <div className="flex flex-wrap gap-2">
+              <QuickLink href="/attendance" label="Mark Attendance" icon={ICONS.check} />
+              <QuickLink href="/homework" label="Create Homework" icon="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+              <QuickLink href="/timetable" label="View Timetable" icon={ICONS.calendar} />
+              <QuickLink href="/classes" label="View Curriculum" icon={ICONS.programs} />
+            </div>
+          </div>
+        </>
       ) : (
         <>
           {/* Gradient KPI Cards */}

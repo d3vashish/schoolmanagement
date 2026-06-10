@@ -1,4 +1,4 @@
-const ACADEMIC = ['/', '/students', '/classes', '/subjects', '/attendance', '/timetable', '/homework', '/behaviour', '/library', '/admissions']
+const ACADEMIC = ['/', '/students', '/subjects', '/classes', '/attendance', '/timetable', '/homework', '/behaviour', '/library', '/admissions']
 const EXAMS = ['/exams', '/class-tests', '/certificates', '/reports', '/exam-management']
 const FINANCE = ['/', '/employees', '/salary', '/accounts', '/fees', '/reports']
 const COMMS = ['/live-class', '/messaging', '/notifications', '/store']

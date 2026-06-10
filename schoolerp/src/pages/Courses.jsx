@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, createDoc } from '../api/frappe';
-import { useFrappeList } from '../hooks/useFrappeQuery';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getList } from '../api/frappe';
+import { useSubjects, useCreateSubject } from '../hooks/useSubjects';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const CARD_COLORS = [
   { bg: 'bg-[#E8F9ED]',    border: 'border-[#BBF7D0]',    badge: 'bg-[#BBF7D0] text-[#2ED05D]',      dot: 'bg-blue-400'    },
@@ -33,11 +33,10 @@ export default function Courses() {
   const [filterInstructor, setFilterInstructor] = useState('');
   const [showModal, setShowModal]               = useState(false);
   const [selectedCourse, setSelectedCourse]     = useState(null);
-  const [saving, setSaving]                     = useState(false);
-  const [formData, setFormData]                 = useState({ course_name: '', description: '' });
+  const [formData, setFormData]                 = useState({ name: '', description: '' });
   const [error, setError]                       = useState('');
 
-  const { data: coursesRaw = [], isLoading: loadingCourses } = useFrappeList('Course', [], ['name', 'course_name', 'description'], 200);
+  const { data: coursesRaw = [], isLoading: loadingCourses } = useSubjects();
 
   const { data: schedules = [] } = useQuery({
     queryKey: ['Course Schedule', 'all-for-courses', selectedYear],
@@ -75,39 +74,38 @@ export default function Courses() {
 
   const courses = coursesRaw.map((c, idx) => ({
     ...c,
-    instructors: courseInstructorMap[c.name] ? Array.from(courseInstructorMap[c.name]) : [],
-    scheduleCount: courseScheduleCount[c.name] || 0,
+    instructors: courseInstructorMap[c.id] ? Array.from(courseInstructorMap[c.id]) : [],
+    scheduleCount: courseScheduleCount[c.id] || 0,
     colorIdx: idx % CARD_COLORS.length,
   }));
 
-  const createMutation = useMutation({
-    mutationFn: (data) => createDoc('Course', data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['Course'] });
-      setShowModal(false);
-      setFormData({ course_name: '', description: '' });
-      setError('');
-    },
-    onError: (err) => setError(err.response?.data?.message || 'Failed to create course.'),
-    onSettled: () => setSaving(false),
-  });
+  const createMutation = useCreateSubject();
 
   const filtered = courses.filter((c) => {
     const q = search.toLowerCase();
-    const matchSearch = !search || c.course_name?.toLowerCase().includes(q) || c.instructors?.some((i) => i.toLowerCase().includes(q));
+    const matchSearch = !search || c.name?.toLowerCase().includes(q) || c.instructors?.some((i) => i.toLowerCase().includes(q));
     const matchInst = !filterInstructor || c.instructors.includes(filterInstructor);
     return matchSearch && matchInst;
   });
 
   const handleAdd = () => {
-    if (!formData.course_name.trim()) { setError('Course name is required.'); return; }
-    setSaving(true); setError('');
-    createMutation.mutate({ course_name: formData.course_name.trim(), description: formData.description.trim() });
+    if (!formData.name.trim()) { setError('Course name is required.'); return; }
+    setError('');
+    createMutation.mutate(
+      { name: formData.name.trim(), description: formData.description.trim(), code: '' },
+      {
+        onSuccess: () => {
+          setShowModal(false);
+          setFormData({ name: '', description: '' });
+        },
+        onError: (err) => setError(err.response?.data?.detail || 'Failed to create course.')
+      }
+    );
   };
 
   const withInstructors = courses.filter((c) => c.instructors.length > 0).length;
   const totalSchedules = schedules.length;
-  const courseSchedules = selectedCourse ? schedules.filter((s) => s.course === selectedCourse.name) : [];
+  const courseSchedules = selectedCourse ? schedules.filter((s) => s.course === selectedCourse.id) : [];
 
   return (
     <div className="space-y-6">
@@ -166,11 +164,11 @@ export default function Courses() {
             filtered.map((course) => {
               const col = CARD_COLORS[course.colorIdx];
               return (
-                <div key={course.name} onClick={() => setSelectedCourse(course)} className={`p-5 rounded-2xl border ${col.bg} ${col.border} hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group`}>
+                <div key={course.id} onClick={() => setSelectedCourse(course)} className={`p-5 rounded-2xl border ${col.bg} ${col.border} hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer group`}>
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex items-center gap-2">
                       <span className={`w-2.5 h-2.5 rounded-full ${col.dot} mt-0.5 shrink-0`} />
-                      <h3 className="font-semibold text-[var(--color-text)] group-hover:underline underline-offset-2">{course.course_name}</h3>
+                      <h3 className="font-semibold text-[var(--color-text)] group-hover:underline underline-offset-2">{course.name}</h3>
                     </div>
                     {course.scheduleCount > 0 && (
                       <span className={`text-xs font-medium px-2 py-0.5 rounded-full shrink-0 ${col.badge}`}>
@@ -211,7 +209,7 @@ export default function Courses() {
                       <span className={`w-1.5 h-1.5 rounded-full ${col.dot}`} />
                       {selectedCourse.scheduleCount} class{selectedCourse.scheduleCount !== 1 ? 'es' : ''} scheduled
                     </span>
-                    <h2 className="text-xl font-bold text-[var(--color-text)]">{selectedCourse.course_name}</h2>
+                    <h2 className="text-xl font-bold text-[var(--color-text)]">{selectedCourse.name}</h2>
                   </div>
                   <button onClick={() => setSelectedCourse(null)} className="text-gray-400 hover:text-gray-700 mt-1 shrink-0 ml-2 group">
                     <span className="w-5 h-5 rounded-full bg-black/5 flex items-center justify-center group-hover:bg-black/10 transition-all duration-300">
@@ -253,7 +251,7 @@ export default function Courses() {
                 </PanelSection>
               </div>
               <div className="p-4 border-t border-gray-100">
-                <a href={`/app/course/${encodeURIComponent(selectedCourse.name)}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
+                <a href={`/app/course/${encodeURIComponent(selectedCourse.id)}`} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                   Open in ERPNext
                 </a>
@@ -278,7 +276,7 @@ export default function Courses() {
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium text-[var(--color-text)] mb-1">Course Name <span className="text-red-500">*</span></label>
-                <input className="input w-full" placeholder="e.g. Mathematics" value={formData.course_name} onChange={(e) => setFormData({ ...formData, course_name: e.target.value })} />
+                <input className="input w-full" placeholder="e.g. Mathematics" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
               </div>
               <div>
                 <label className="block text-sm font-medium text-[var(--color-text)] mb-1">Description</label>
@@ -287,7 +285,7 @@ export default function Courses() {
             </div>
             <div className="flex gap-3 pt-2">
               <button onClick={() => { setShowModal(false); setError(''); }} className="flex-1 py-2.5 px-4 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition">Cancel</button>
-              <button onClick={handleAdd} disabled={saving} className="flex-1 btn-primary py-2.5 px-4 text-sm disabled:opacity-60">{saving ? 'Saving...' : 'Create Course'}</button>
+              <button onClick={handleAdd} disabled={createMutation.isPending} className="flex-1 btn-primary py-2.5 px-4 text-sm disabled:opacity-60">{createMutation.isPending ? 'Saving...' : 'Create Course'}</button>
             </div>
           </div>
         </div>

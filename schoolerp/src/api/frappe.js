@@ -257,15 +257,15 @@ const HANDLERS = {
       const url = urlFor('Student Group', 'list');
       let items = await fetchList('Student Group', url, filters, ['id', 'name', 'class_id', 'capacity', 'academic_year_id', 'program', 'academic_year', ...fields], pageLength, pageStart);
       return items.map(s => ({
+        ...pick(s, fields),
         name: s.id || s.name,
-        student_group_name: s.name || s.id,
+        student_group_name: s.program && s.name ? `${s.program} - ${s.name}` : (s.name || s.id),
         program: s.program || s.class_id || '',
         academic_year: s.academic_year || s.academic_year_id || '',
         class_teacher: s.class_teacher || '',
         group_based_on: 'Batch',
         max_strength: s.capacity || '',
         students: s.students || [],
-        ...pick(s, fields),
       }));
     },
     async get(name) {
@@ -278,7 +278,7 @@ const HANDLERS = {
       }));
       return {
         name: item.id || item.name || name,
-        student_group_name: item.name || name,
+        student_group_name: item.program && item.name ? `${item.program} - ${item.name}` : (item.name || name),
         program: item.program || item.class_id || '',
         academic_year: item.academic_year || item.academic_year_id || '',
         students,
@@ -313,11 +313,12 @@ const HANDLERS = {
       const url = urlFor('Course', 'list');
       let items = await fetchList('Course', url, filters, ['id', 'name', 'code', 'is_graded', ...fields], pageLength, pageStart);
       return items.map(s => ({
+        ...pick(s, fields),
+        id: s.id,
         name: s.id || s.name,
         course_name: s.name || s.id,
         course_code: s.code || '',
         is_graded: s.is_graded ?? true,
-        ...pick(s, fields),
       }));
     },
     async get(name) {
@@ -502,6 +503,8 @@ const HANDLERS = {
       const url = urlFor('Instructor', 'list');
       let items = await fetchList('Instructor', url, filters, ['id', 'user_id', 'email', 'first_name', 'last_name', 'employee_id', 'department', 'qualification', 'is_active', ...(fields || [])], pageLength, pageStart);
       return items.map(i => ({
+        ...pick(i, fields),
+        id: i.id,
         name: i.user_id || i.id || i.name,
         instructor_name: `${i.first_name || ''} ${i.last_name || ''}`.trim() || i.email || i.name,
         email: i.email || '',
@@ -509,7 +512,6 @@ const HANDLERS = {
         department: i.department || '',
         qualification: i.qualification || '',
         enabled: i.is_active ? 1 : 0,
-        ...pick(i, fields),
       }));
     },
     async get(name) {
@@ -629,19 +631,24 @@ const HANDLERS = {
     async list(filters, fields, pageLength, pageStart) {
       const url = urlFor('Course Schedule', 'list');
       let items = await fetchList('Course Schedule', url, filters, ['id', 'section_id', 'subject_id', 'teacher_id', 'day_of_week', 'period_no', 'academic_year_id', 'is_published', ...(fields || [])], pageLength, pageStart);
-      return items.map(s => ({
-        name: s.id || s.name,
-        course: s.subject_id || '',
-        section: s.section_id || '',
-        student_group: s.section_id || '',
-        day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][s.day_of_week] || '',
-        day_of_week: s.day_of_week,
-        period_no: s.period_no,
-        from_time: s.start_time || '',
-        to_time: s.end_time || '',
-        room: s.room || '',
-        ...pick(s, fields),
-      }));
+      return items.map(s => {
+        const hour = s.period_no + 7;
+        const from_time = `${String(hour).padStart(2, '0')}:00:00`;
+        const to_time = `${String(hour + 1).padStart(2, '0')}:00:00`;
+        return {
+          name: s.id || s.name,
+          course: s.subject_id || '',
+          section: s.section_id || '',
+          student_group: s.section_id || '',
+          day: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][s.day_of_week] || '',
+          day_of_week: s.day_of_week,
+          period_no: s.period_no,
+          from_time: s.start_time || from_time,
+          to_time: s.end_time || to_time,
+          room: s.room || '',
+          ...pick(s, fields),
+        };
+      });
     },
     async get(name) {
       const url = urlFor('Course Schedule', 'single', name);
@@ -649,25 +656,31 @@ const HANDLERS = {
     },
     async create(data) {
       const dayMap = { 'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6 };
+      const d = data.day_of_week || data.day;
+      const dayNum = typeof d === 'string' ? dayMap[d] : (d ?? 0);
+      const periodNum = data.period_no || data.period || (data.from_time ? Math.max(1, parseInt(data.from_time.split(':')[0], 10) - 7) : 1);
       const res = await client.post('/timetable/slots', {
         section_id: data.student_group || '',
         subject_id: data.course || '',
         teacher_id: data.instructor || '',
-        day_of_week: dayMap[data.day] ?? data.day ?? 0,
-        period_no: parseInt(data.period_no || data.period || 1),
-        academic_year_id: data.academic_year || '',
+        day_of_week: dayNum,
+        period_no: periodNum,
+        academic_year_id: data.academic_year || '754e7fc0-2e8a-4b5b-9732-496d47de3138',
       });
       return { name: res.data.id || `slot-${Date.now()}`, ...data };
     },
     async update(name, data) {
       const dayMap = { 'Monday': 0, 'Tuesday': 1, 'Wednesday': 2, 'Thursday': 3, 'Friday': 4, 'Saturday': 5, 'Sunday': 6 };
+      const d = data.day_of_week || data.day;
+      const dayNum = typeof d === 'string' ? dayMap[d] : (d ?? 0);
+      const periodNum = data.period_no || data.period || (data.from_time ? Math.max(1, parseInt(data.from_time.split(':')[0], 10) - 7) : 1);
       const res = await client.patch(`/timetable/slots/${name}`, {
         section_id: data.student_group || '',
         subject_id: data.course || '',
         teacher_id: data.instructor || '',
-        day_of_week: dayMap[data.day] ?? data.day ?? 0,
-        period_no: parseInt(data.period_no || data.period || 1),
-        academic_year_id: data.academic_year || '',
+        day_of_week: dayNum,
+        period_no: periodNum,
+        academic_year_id: data.academic_year || '754e7fc0-2e8a-4b5b-9732-496d47de3138',
       });
       return { name, ...data };
     },
@@ -2025,18 +2038,18 @@ export async function getExamSubjects(examId) {
   let items = Array.isArray(res.data) ? res.data : res.data?.data || res.data?.results || [];
   return items.map(s => ({
     id: s.id || s.name,
+    subject_id: s.subject_id || '',
     subject_name: s.subject_name || '',
     max_marks: s.max_marks || 100,
-    pass_marks: s.pass_marks || 35,
-    teacher_name: s.teacher_name || '',
+    date: s.date || '',
   }));
 }
 
 export async function addExamSubject(examId, data) {
   const res = await client.post(`/exams/${examId}/subjects`, {
-    subject_name: data.subject_name || '',
+    subject_id: data.subject_id || '',
     max_marks: data.max_marks || 100,
-    pass_marks: data.pass_marks || 35,
+    date: data.date || null,
   });
   return { id: res.data.id || res.data.name, ...res.data };
 }

@@ -1,29 +1,36 @@
 import asyncio
 from app.core.database import get_db
-from app.modules.auth.models import User, StudentProfile
+from app.modules.auth.models import User
+from app.modules.academic.models import Enrollment, Class, Section, AcademicYear
 from sqlalchemy import select
 
 async def main():
     async for db in get_db():
-        students = await db.execute(select(StudentProfile))
-        students = students.scalars().all()
-        with_section = [s for s in students if s.section_id]
-        without_section = [s for s in students if not s.section_id]
-        print(f"Students total: {len(students)}")
+        enrollments = await db.execute(
+            select(Enrollment).where(Enrollment.status == "ACTIVE")
+        )
+        enrollments = enrollments.scalars().all()
+
+        with_section = [e for e in enrollments if e.section_id]
+        without_section = [e for e in enrollments if not e.section_id]
+        print(f"Active enrollments total: {len(enrollments)}")
         print(f"With section: {len(with_section)}")
         print(f"Without section: {len(without_section)}")
 
         if without_section:
-            print("\nSample students without section:")
-            for s in without_section[:5]:
-                user = await db.execute(select(User).where(User.id == s.user_id))
-                user = user.scalar_one_or_none()
-                print(f"  Student {s.id}: user={s.user_id} class_id={s.class_id} section_id={s.section_id} email={user.email if user else 'N/A'}")
+            print("\nSample enrollments without section:")
+            for e in without_section[:5]:
+                cls = await db.get(Class, e.class_id)
+                year = await db.get(AcademicYear, e.academic_year_id)
+                print(f"  Enrollment {e.id}: student={e.student_id} class={cls.name if cls else '?'} year={year.name if year else '?'}")
 
         if with_section:
-            print("\nSample students WITH section:")
-            for s in with_section[:5]:
-                print(f"  Student {s.id}: user={s.user_id} class_id={s.class_id} section_id={s.section_id}")
+            print("\nSample enrollments WITH section:")
+            for e in with_section[:5]:
+                cls = await db.get(Class, e.class_id)
+                sec = await db.get(Section, e.section_id)
+                year = await db.get(AcademicYear, e.academic_year_id)
+                print(f"  Enrollment {e.id}: student={e.student_id} class={cls.name if cls else '?'} section={sec.name if sec else '?'} year={year.name if year else '?'}")
 
         break
 

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class HomeworkCreate(BaseModel):
     title: str
     description: str = ""
+    subject_id: UUID | None = None
     course: str = ""
     course_name: str = ""
     student_group: str = ""
@@ -30,6 +31,7 @@ class HomeworkCreate(BaseModel):
 class HomeworkUpdate(BaseModel):
     title: str | None = None
     description: str | None = None
+    subject_id: UUID | None = None
     course: str | None = None
     course_name: str | None = None
     student_group: str | None = None
@@ -63,6 +65,9 @@ class HomeworkResponse(BaseModel):
     max_points: int | None
     assigned_by: str
     assigned_by_name: str
+    section_id: UUID | None = None
+    subject_id: UUID | None = None
+    created_by_id: UUID | None = None
     assigned_date: date
     status: str
     gc_course_id: str
@@ -75,3 +80,32 @@ class HomeworkResponse(BaseModel):
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class HomeworkSubmissionCreate(BaseModel):
+    homework_id: UUID
+    student_id: UUID
+    submission_text: str | None = None
+    file_url: str | None = None
+
+
+class HomeworkSubmissionResponse(BaseModel):
+    id: UUID
+    homework_id: UUID
+    student_id: UUID
+    student_name: str | None = None
+    submission_text: str | None = None
+    file_url: str | None = None
+    submitted_at: datetime
+    status: str
+    marks: int | None = None
+    graded_by: UUID | None = None
+    graded_at: datetime | None = None
+    remarks: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class HomeworkGradeSubmission(BaseModel):
+    marks: int
+    remarks: str | None = None

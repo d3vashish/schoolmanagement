@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.auth.models import StudentProfile, User
-from app.modules.academic.models import AcademicProgression, AcademicYear, Class
+from app.modules.academic.models import AcademicProgression, AcademicYear, Class, Enrollment
 
 
 class PromotionError(Exception):
@@ -58,15 +58,41 @@ async def promote_students(
             f"Students {[str(e.student_id) for e in existing]} already have progression records for this year"
         )
 
+    # Get current active enrollments
+    enrollments = (
+        await db.execute(
+            select(Enrollment).where(
+                Enrollment.student_id.in_(student_ids),
+                Enrollment.academic_year_id == from_academic_year_id,
+                Enrollment.status == "ACTIVE",
+            )
+        )
+    ).scalars().all()
+
+    enrollment_map = {str(e.student_id): e for e in enrollments}
+
     progressions = []
     now = datetime.now(timezone.utc)
 
     for student in students:
-        is_retained = student.class_id == to_class_id
-        from_class_id = student.class_id
+        current_enrollment = enrollment_map.get(str(student.id))
+        from_class_id = current_enrollment.class_id if current_enrollment else None
+        is_retained = from_class_id == to_class_id if from_class_id else False
 
-        if not is_retained:
-            student.class_id = to_class_id
+        # Close old enrollment
+        if current_enrollment:
+            current_enrollment.status = "PROMOTED"
+            current_enrollment.left_at = now
+
+        # Create new enrollment for next year
+        new_enrollment = Enrollment(
+            student_id=student.id,
+            class_id=to_class_id,
+            academic_year_id=to_academic_year_id,
+            status="ACTIVE",
+            enrolled_at=now,
+        )
+        db.add(new_enrollment)
 
         prog = AcademicProgression(
             student_id=student.id,

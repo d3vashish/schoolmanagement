@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.academic.models import Section
+from app.modules.academic.models import Enrollment, Section
 from app.modules.admissions.models import Admission, can_transition
 from app.modules.auth.models import StudentProfile, User
 from app.modules.auth.service import create_user
@@ -36,8 +36,10 @@ async def transition_status(
 
 async def count_enrolled(section_id: str, academic_year_id: str, db: AsyncSession) -> int:
     result = await db.execute(
-        select(func.count(StudentProfile.id)).where(
-            StudentProfile.class_id == section_id
+        select(func.count(Enrollment.student_id)).where(
+            Enrollment.section_id == section_id,
+            Enrollment.academic_year_id == academic_year_id,
+            Enrollment.status == "ACTIVE",
         )
     )
     return result.scalar() or 0
@@ -77,13 +79,22 @@ async def enroll_student(
         first_name=admission.applicant_name.split(" ", 1)[0],
         last_name=admission.applicant_name.split(" ", 1)[1] if " " in admission.applicant_name else "",
         admission_number=admission_number,
-        class_id=section.class_id,
         guardian_name=admission.parent_name,
         guardian_phone=admission.parent_phone,
         address=admission.address,
         date_of_birth=admission.date_of_birth,
     )
     db.add(student)
+    await db.flush()
+
+    enrollment = Enrollment(
+        student_id=student.id,
+        class_id=section.class_id,
+        section_id=section_id,
+        academic_year_id=admission.academic_year_id,
+        status="ACTIVE",
+    )
+    db.add(enrollment)
     admission.status = "ENROLLED"
     await db.flush()
     return student, temp_pw

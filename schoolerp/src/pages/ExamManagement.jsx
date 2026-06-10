@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useExams, useCreateExam, useUpdateExamStatus, useExamSubjects, useAddExamSubject, useExamResults, useBulkSaveExamResults, useUpdateExamResult, useGradingSchemes, useCreateGradingScheme, useExamAggregates, useTriggerReportCards } from '../hooks/useExams';
+import { useSubjects } from '../hooks/useSubjects';
 
 export default function ExamManagement() {
   const [tab, setTab] = useState('exams');
@@ -20,11 +21,13 @@ export default function ExamManagement() {
   const { data: aggregates = [] } = useExamAggregates(selectedExam?.id);
   const triggerCards = useTriggerReportCards();
 
+  const { data: allSubjects = [] } = useSubjects();
+
   const [showCreate, setShowCreate] = useState(false);
   const [showSubject, setShowSubject] = useState(false);
   const [showScheme, setShowScheme] = useState(false);
   const [examForm, setExamForm] = useState({ exam_name: '', exam_type: '', class_name: '', academic_year: '', start_date: '', end_date: '' });
-  const [subjectForm, setSubjectForm] = useState({ subject_name: '', max_marks: 100, pass_marks: 35 });
+  const [subjectForm, setSubjectForm] = useState({ subject_id: '', max_marks: 100, date: '' });
   const [schemeForm, setSchemeForm] = useState({ scheme_name: '', grades: [] });
   const [marksEdit, setMarksEdit] = useState({});
 
@@ -296,9 +299,12 @@ export default function ExamManagement() {
             <h3 className="text-lg font-extrabold text-[#2D2A24] mb-4">Add Subject</h3>
             <div className="space-y-3">
               <div>
-                <label className="text-xs font-semibold text-[#8A8680] uppercase tracking-wide mb-1 block">Subject Name</label>
-                <input value={subjectForm.subject_name} onChange={e => setSubjectForm(f => ({ ...f, subject_name: e.target.value }))}
-                  className="input py-2.5 px-4 w-full text-sm font-medium border border-[#e2e8f0] rounded-xl" />
+                <label className="text-xs font-semibold text-[#8A8680] uppercase tracking-wide mb-1 block">Subject</label>
+                <select value={subjectForm.subject_id} onChange={e => setSubjectForm(f => ({ ...f, subject_id: e.target.value }))}
+                  className="input py-2.5 px-4 w-full text-sm font-medium border border-[#e2e8f0] rounded-xl">
+                  <option value="">Select a Subject</option>
+                  {allSubjects.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -307,15 +313,15 @@ export default function ExamManagement() {
                     className="input py-2.5 px-4 w-full text-sm font-medium border border-[#e2e8f0] rounded-xl" />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-[#8A8680] uppercase tracking-wide mb-1 block">Pass Marks</label>
-                  <input type="number" value={subjectForm.pass_marks} onChange={e => setSubjectForm(f => ({ ...f, pass_marks: parseInt(e.target.value) || 35 }))}
+                  <label className="text-xs font-semibold text-[#8A8680] uppercase tracking-wide mb-1 block">Date (Optional)</label>
+                  <input type="date" value={subjectForm.date} onChange={e => setSubjectForm(f => ({ ...f, date: e.target.value }))}
                     className="input py-2.5 px-4 w-full text-sm font-medium border border-[#e2e8f0] rounded-xl" />
                 </div>
               </div>
             </div>
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowSubject(false)} className="px-4 py-2.5 rounded-xl text-sm font-bold bg-gray-100 text-[#475569] hover:bg-gray-200 cursor-pointer">Cancel</button>
-              <button onClick={() => { addSubject.mutate({ examId: selectedExam.id, data: subjectForm }, { onSuccess: () => { setShowSubject(false); setSubjectForm({ subject_name: '', max_marks: 100, pass_marks: 35 }); }}); }}
+              <button onClick={() => { addSubject.mutate({ examId: selectedExam.id, data: subjectForm }, { onSuccess: () => { setShowSubject(false); setSubjectForm({ subject_id: '', max_marks: 100, date: '' }); }}); }}
                 className="px-5 py-2.5 rounded-xl text-sm font-bold bg-[#2ED05D] text-white hover:bg-[#25B04E] cursor-pointer">Add</button>
             </div>
           </div>

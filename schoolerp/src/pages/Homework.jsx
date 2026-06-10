@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useHomeworkList, useCreateHomework, useUpdateHomework, useDeleteHomework } from '../hooks/useHomework';
-import { useFrappeList } from '../hooks/useFrappeQuery';
+import { useSubjects } from '../hooks/useSubjects';
 import {
   useGCConnection, useGCConnect, useGCDisconnect, useGCSync,
 } from '../hooks/useGoogleClassroom';
@@ -84,7 +84,7 @@ function SyncBadge({ status, gcInviteCode, onRetry }) {
   return null;
 }
 
-function HomeworkModal({ editing, courses, groups, onClose }) {
+function HomeworkModal({ editing, subjects, groups, onClose }) {
   const { user } = useAuth();
   const { selectedYear } = useAcademicYear();
   const create = useCreateHomework();
@@ -97,14 +97,14 @@ function HomeworkModal({ editing, courses, groups, onClose }) {
   const [form, setForm] = useState({
     title: editing?.title || '',
     description: editing?.description || '',
-    courseId: editing?.course || '',
+    subjectId: editing?.subject_id || editing?.course || '',
     studentGroup: editing?.student_group || '',
     dueDate: editing?.due_date || '',
     maxPoints: editing?.max_points ?? '',
     syncToGC: false,
   });
 
-  const selectedCourse = courses.find(c => c.name === form.courseId);
+  const selectedSubject = subjects.find(s => s.id === form.subjectId);
   const selectedGroup = groups.find(g => g.name === form.studentGroup);
 
   async function handleSubmit(e) {
@@ -114,8 +114,8 @@ function HomeworkModal({ editing, courses, groups, onClose }) {
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
-      courseId: form.courseId,
-      courseName: selectedCourse?.course_name || form.courseId,
+      subject_id: form.subjectId,
+      courseName: selectedSubject?.name || form.subjectId,
       studentGroup: form.studentGroup,
       className: selectedGroup?.student_group_name || form.studentGroup,
       academicYear: selectedYear || '',
@@ -214,13 +214,13 @@ function HomeworkModal({ editing, courses, groups, onClose }) {
               </label>
               <select
                 required
-                value={form.courseId}
-                onChange={e => setForm(f => ({ ...f, courseId: e.target.value }))}
+                value={form.subjectId}
+                onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
                 className="w-full px-3.5 py-2.5 rounded-[10px] text-sm border border-[#E8E0D8] bg-white text-[#2D2A24] appearance-none cursor-pointer transition-[border-color,box-shadow] duration-200 focus:border-[#FF8C42] focus:shadow-[0_0_0_3px_rgba(255,140,66,0.1)]"
               >
                 <option value="">Select subject</option>
-                {courses.map(c => (
-                  <option key={c.name} value={c.name}>{c.course_name}</option>
+                {subjects.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
                 ))}
               </select>
             </div>
@@ -434,7 +434,7 @@ export default function Homework() {
   const [editing, setEditing] = useState(null);
   const [setupDone, setSetupDone] = useState(false);
 
-  const { data: courses = [], isLoading: coursesLoading } = useFrappeList('Course', [], ['name', 'course_name'], 200);
+  const { data: allSubjects = [], isLoading: subjectsLoading } = useSubjects();
   const { data: allHomework = [], isLoading: hwLoading } = useHomeworkList();
   const deleteHw = useDeleteHomework();
   const updateHw = useUpdateHomework();
@@ -463,7 +463,8 @@ export default function Homework() {
 
   const grouped = {};
   filtered.forEach(hw => {
-    const key = hw.course_name || 'General';
+    const subject = allSubjects.find(s => s.id === hw.subject_id);
+    const key = subject ? subject.name : (hw.course_name || 'General');
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(hw);
   });
@@ -579,11 +580,11 @@ export default function Homework() {
         </div>
       </div>
 
-      {hwLoading || coursesLoading ? (
+      {hwLoading || subjectsLoading ? (
         <div className="flex items-center justify-center py-24">
           <Loader2 size={24} className="animate-spin text-[#8A8680]" />
         </div>
-      ) : courses.length === 0 ? (
+      ) : allSubjects.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-[28px] border border-[#F0EAE4] shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
           <div className="w-[72px] h-[72px] rounded-[20px] bg-[#FFF1E8] flex items-center justify-center mb-5">
             <GraduationCap size={32} className="text-[#FF8C42]/60" />
@@ -614,7 +615,7 @@ export default function Homework() {
       {showModal && (
         <HomeworkModal
           editing={editing}
-          courses={courses}
+          subjects={allSubjects}
           groups={groups}
           onClose={() => { setShowModal(false); setEditing(null); }}
         />

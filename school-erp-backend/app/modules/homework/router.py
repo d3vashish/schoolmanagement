@@ -1,11 +1,20 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import QueryScoper, get_current_user, role_required
-from app.modules.homework.models import HomeworkAssignment
-from app.modules.homework.schemas import HomeworkCreate, HomeworkResponse, HomeworkUpdate
+from app.modules.homework.models import HomeworkAssignment, HomeworkSubmission
+from app.modules.homework.schemas import (
+    HomeworkCreate,
+    HomeworkGradeSubmission,
+    HomeworkResponse,
+    HomeworkSubmissionCreate,
+    HomeworkSubmissionResponse,
+    HomeworkUpdate,
+)
 
 admin_teacher = [role_required("super_admin", "principal", "teacher")]
 
@@ -91,3 +100,41 @@ async def delete_homework(homework_id: str, db: AsyncSession = Depends(get_db)):
     if not hw:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Homework not found")
     await db.delete(hw)
+
+
+@router.post("/submissions", response_model=HomeworkSubmissionResponse, dependencies=[role_required("teacher", "student")])
+async def create_submission(body: HomeworkSubmissionCreate, db: AsyncSession = Depends(get_db)):
+    homework = await db.get(HomeworkAssignment, body.homework_id)
+    if not homework:
+        raise HTTPException(status_code=404, detail="Homework not found")
+    result = await db.execute(
+        select(HomeworkSubmission).where(
+            HomeworkSubmission.homework_id == body.homework_id,
+            HomeworkSubmission.student_id == body.student_id,
+        )
+    )
+    if result.first():
+        raise HTTPException(status_code=409, detail="Already submitted")
+    sub = HomeworkSubmission(**body.model_dump())
+    db.add(sub)
+    return sub
+
+
+@router.get("/submissions/{homework_id}", response_model=list[HomeworkSubmissionResponse], dependencies=[role_required("teacher", "principal", "super_admin")])
+async def list_submissions(homework_id: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(HomeworkSubmission).where(HomeworkSubmission.homework_id == homework_id).order_by(HomeworkSubmission.submitted_at)
+    )
+    return result.scalars().all()
+
+
+@router.patch("/submissions/{submission_id}/grade", response_model=HomeworkSubmissionResponse, dependencies=[role_required("teacher")])
+async def grade_submission(submission_id: str, body: HomeworkGradeSubmission, db: AsyncSession = Depends(get_db)):
+    sub = await db.get(HomeworkSubmission, submission_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    sub.marks = body.marks
+    sub.remarks = body.remarks
+    sub.graded_at = datetime.utcnow()
+    sub.status = "GRADED"
+    return sub

@@ -15,6 +15,7 @@ from app.core.security import (
     store_otp,
     verify_otp,
 )
+from app.modules.academic.models import Enrollment
 from app.modules.auth.models import ROLES, StudentProfile, StaffProfile, ParentProfile, User
 from app.modules.auth.schemas import (
     LoginRequest,
@@ -179,7 +180,14 @@ async def list_users(
     if class_id:
         q = q.where(
             User.id.in_(
-                select(StudentProfile.user_id).where(StudentProfile.class_id == class_id)
+                select(StudentProfile.user_id).where(
+                    StudentProfile.id.in_(
+                        select(Enrollment.student_id).where(
+                            Enrollment.class_id == class_id,
+                            Enrollment.status == "ACTIVE",
+                        )
+                    )
+                )
             )
         )
     q = q.order_by(User.created_at.desc())

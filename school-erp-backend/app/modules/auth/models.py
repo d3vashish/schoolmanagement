@@ -39,11 +39,9 @@ class StudentProfile(Base, TimestampMixin):
     last_name = Column(String(100), nullable=False)
     date_of_birth = Column(DateTime(timezone=True), nullable=True)
     admission_number = Column(String(50), unique=True, nullable=False)
-    class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id"), nullable=True)
     guardian_name = Column(String(200), nullable=True)
     guardian_phone = Column(String(20), nullable=True)
     address = Column(Text, nullable=True)
-    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id"), nullable=True)
 
     user = relationship("User", back_populates="student_profiles")
 
@@ -55,6 +53,7 @@ class StaffProfile(Base, TimestampMixin):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     employee_id = Column(String(50), unique=True, nullable=False)
+    designation = Column(String(100), nullable=True)
     department = Column(String(100), nullable=True)
     qualification = Column(String(200), nullable=True)
     joining_date = Column(DateTime(timezone=True), nullable=True)
@@ -68,6 +67,7 @@ class ParentProfile(Base, TimestampMixin):
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True)
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
+    # DEPRECATED: will be removed in migration — use ParentStudentLink instead
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)

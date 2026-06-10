@@ -21,8 +21,8 @@ const Fees = lazy(() => import('./pages/Fees'));
 const Users = lazy(() => import('./pages/Users'));
 const UserDetail = lazy(() => import('./pages/UserDetail'));
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings'));
-const Classes = lazy(() => import('./pages/Classes'));
 const Subjects = lazy(() => import('./pages/Subjects'));
+const Classes = lazy(() => import('./pages/Classes'));
 const Employees = lazy(() => import('./pages/Employees'));
 const Accounts = lazy(() => import('./pages/Accounts'));
 const Salary = lazy(() => import('./pages/Salary'));
@@ -72,8 +72,8 @@ function App() {
                   <Route path="students" element={<Students />} />
                   <Route path="students/lookup" element={<StudentLookup />} />
                   <Route path="students/:id" element={<StudentDetail />} />
-                  <Route path="classes" element={<Classes />} />
                   <Route path="subjects" element={<Subjects />} />
+                  <Route path="classes" element={<Classes />} />
                   <Route path="attendance" element={<Attendance />} />
                   <Route path="timetable" element={<Timetable />} />
                   <Route path="homework" element={<Homework />} />
@@ -112,7 +112,7 @@ function App() {
                   <Route path="audit-log" element={<AuditLog />} />
 
                   {/* ── Legacy redirects ── */}
-                  <Route path="programs" element={<Navigate to="/classes" replace />} />
+                  <Route path="programs" element={<Navigate to="/students" replace />} />
                   <Route path="courses" element={<Navigate to="/subjects" replace />} />
                   <Route path="schedule" element={<Navigate to="/timetable" replace />} />
                 </Route>

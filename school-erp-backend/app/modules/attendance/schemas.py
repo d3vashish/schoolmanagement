@@ -9,6 +9,9 @@ class AttendanceMark(BaseModel):
     date: date
     period_no: int | None = None
     status: str
+    section_id: str | None = None
+    subject_id: str | None = None
+    academic_year_id: str | None = None
 
 
 class AttendanceResponse(BaseModel):
@@ -18,6 +21,9 @@ class AttendanceResponse(BaseModel):
     period_no: int | None
     status: str
     marked_by: UUID
+    section_id: UUID | None = None
+    subject_id: UUID | None = None
+    academic_year_id: UUID | None = None
     is_corrected: bool
 
     model_config = {"from_attributes": True}

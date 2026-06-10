@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, getDoc, createDoc, updateDoc, adminCreateDoc, adminUpdateDoc } from '../api/frappe';
+import { getList, getDoc, createDoc, updateDoc, adminCreateDoc, adminUpdateDoc, client } from '../api/frappe';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import DatePicker from '../components/DatePicker';
+import { isTeacher as checkIsTeacher } from '../utils/roles';
 
 const today = () => new Date().toISOString().split('T')[0];
 
@@ -22,7 +23,7 @@ export default function Attendance() {
   const { selectedYear, isCurrentYear } = useAcademicYear();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const isTeacher = user?.roles?.includes('Instructor');
+  const isTeacher = checkIsTeacher(user);
 
   const [date, setDate]                   = useState(today());
   const [selectedProgram, setSelectedProgram] = useState('');
@@ -85,30 +86,31 @@ export default function Attendance() {
     }),
   });
 
-  // Build teacher group names: class_teacher group + subject groups
-  const teacherGroupNames = isTeacher
-    ? [...new Set([user.myGroupName, ...(user.mySubjectGroups || [])].filter(Boolean))]
-    : [];
-
-  const { data: teacherGroups = [] } = useQuery({
-    queryKey: ['Attendance', 'teacherGroups', user?.name, selectedYear, ...teacherGroupNames],
-    queryFn: () => {
-      if (teacherGroupNames.length > 0) {
-        const filters = [['name', 'in', teacherGroupNames]];
-        if (selectedYear) filters.push(['academic_year', '=', selectedYear]);
-        return getList('Student Group', filters, ['name', 'student_group_name', 'program'], 100);
-      }
-      // Fallback: class_teacher only
-      const filters = [['class_teacher', '=', user.name]];
-      if (selectedYear) filters.push(['academic_year', '=', selectedYear]);
-      return getList('Student Group', filters, ['name', 'student_group_name', 'program'], 1);
+  const { data: teacherGroups = [], isLoading: teacherGroupsLoading } = useQuery({
+    queryKey: ['Attendance', 'teacherGroups', user?.email],
+    queryFn: async () => {
+      const res = await client.get('/academic/my-teaching-profile');
+      const assignments = (res.data?.assignments || res.data?.data?.assignments || [])
+        .filter(a => a.subject_id === 'class-teacher' || a.subject_code === 'CT');
+      const sectionsMap = new Map();
+      assignments.forEach(a => {
+        if (!sectionsMap.has(a.section_id)) {
+          sectionsMap.set(a.section_id, {
+            name: a.section_id,
+            student_group_name: a.section_name,
+            program: a.class_name,
+            display_name: `${a.class_name || ''} - ${a.section_name || ''}`.trim()
+          });
+        }
+      });
+      return Array.from(sectionsMap.values());
     },
     enabled: isTeacher,
   });
 
   // Auto-select for teachers (useEffect to avoid setState during render)
   useEffect(() => {
-    if (isTeacher && teacherGroups.length > 0 && !selectedGroup) {
+    if (isTeacher && teacherGroups.length === 1 && !selectedGroup) {
       const group = teacherGroups[0];
       setSelectedGroup(group.name);
       setSelectedProgram(group.program || '');
@@ -135,23 +137,37 @@ export default function Attendance() {
   const { data: studentsData, isLoading: loading } = useQuery({
     queryKey: ['Attendance', 'students', selectedGroup, date],
     queryFn: async () => {
-      const [groupDoc, existing] = await Promise.all([
-        getDoc('Student Group', selectedGroup),
-        getList('Student Attendance',
-          [['student_group', '=', selectedGroup], ['date', '=', date]],
-          ['name', 'student', 'status'], 500).catch(() => []),
-      ]);
+      let stuList = [];
+      let existing = [];
+      try {
+        const [studentsRes, attRes] = await Promise.all([
+          client.get(`/academic/students?section_id=${selectedGroup}`),
+          client.get(`/attendance/by-section?section_id=${selectedGroup}&date=${date}`)
+        ]);
+        stuList = studentsRes.data?.data || studentsRes.data || [];
+        existing = attRes.data?.data || attRes.data || [];
+      } catch (err) {
+        console.error(err);
+      }
 
-      const stuList = (groupDoc.students || []).filter(s => s.active);
+      const formattedStudents = stuList
+        .filter(s => s.is_active !== false && s.is_active !== 0)
+        .map(s => ({
+          student: s.id,
+          student_name: s.student_name || `${s.first_name || ''} ${s.last_name || ''}`.trim(),
+          group_roll_number: s.group_roll_number || s.roll_number,
+        }));
+
       const map = {};
       const docMap = {};
-      stuList.forEach(s => { map[s.student] = null; });
-      (existing || []).forEach(r => {
-        map[r.student] = r.status;
-        docMap[r.student] = r.name;
+      formattedStudents.forEach(s => { map[s.student] = null; });
+      existing.forEach(r => {
+        const sid = r.student_id || r.student;
+        map[sid] = r.status;
+        docMap[sid] = r.id || r.name;
       });
 
-      return { students: stuList, attendanceMap: map, existingDocsMap: docMap };
+      return { students: formattedStudents, attendanceMap: map, existingDocsMap: docMap };
     },
     enabled: !!selectedGroup,
   });
@@ -188,9 +204,24 @@ export default function Attendance() {
 
   const { data: summaryRecords = [], isLoading: summaryLoading } = useQuery({
     queryKey: ['Attendance', 'summary', selectedGroup, summaryRange, summaryDates.start, summaryDates.end],
-    queryFn: () => getList('Student Attendance',
-      [['student_group', '=', selectedGroup], ['date', 'between', [summaryDates.start, summaryDates.end]]],
-      ['name', 'student', 'student_name', 'status', 'date'], 1000),
+    queryFn: async () => {
+      try {
+        const res = await client.get('/attendance/overview', {
+          params: { start: summaryDates.start, end: summaryDates.end }
+        });
+        const data = res.data?.data || res.data || [];
+        return data.map(a => ({
+          name: a.id,
+          student: a.student_id || a.student,
+          student_name: a.student_name || '',
+          student_group: a.section_id || a.student_group,
+          status: a.status,
+          date: a.date,
+        })).filter(a => !a.student_group || a.student_group === selectedGroup);
+      } catch {
+        return [];
+      }
+    },
     enabled: tab === 'summary' && !!selectedGroup,
   });
 
@@ -410,31 +441,39 @@ export default function Attendance() {
             onChange={(d) => { setDate(d); setHasChanges(false); }}
           />
         )}
-        {isTeacher && selectedGroup ? (
-          teacherGroups.length > 1 ? (
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Class</label>
-              <select value={selectedGroup} onChange={e => {
-                const g = teacherGroups.find(tg => tg.name === e.target.value);
-                setSelectedGroup(e.target.value);
-                setSelectedProgram(g?.program || '');
-                setAttendance({}); setExistingDocs({}); setHasChanges(false);
-              }} className="input text-sm min-w-[160px]">
-                {teacherGroups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
-              </select>
+        {isTeacher ? (
+          teacherGroupsLoading ? (
+            <div className="text-sm text-gray-500 py-2 flex items-center gap-2">
+              <span className="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin"></span>
+              Loading assigned classes...
             </div>
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Class</label>
-              <div className="input text-sm min-w-[160px] flex items-center bg-gray-50 text-gray-700 font-medium">
-                {selectedProgram} — {selectedGroup?.replace(`${selectedProgram} - `, '')}
+          ) : teacherGroups.length > 0 ? (
+            teacherGroups.length > 1 ? (
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Section</label>
+                <select value={selectedGroup} onChange={e => {
+                  const g = teacherGroups.find(tg => tg.name === e.target.value);
+                  setSelectedGroup(e.target.value);
+                  setSelectedProgram(g?.program || '');
+                  setAttendance({}); setExistingDocs({}); setHasChanges(false);
+                }} className="input text-sm min-w-[160px]">
+                  <option value="">Select a section</option>
+                  {teacherGroups.map(g => <option key={g.name} value={g.name}>{g.display_name || g.student_group_name || g.name}</option>)}
+                </select>
               </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Section</label>
+                <div className="input text-sm min-w-[160px] flex items-center bg-gray-50 text-gray-700 font-medium">
+                  {teacherGroups[0].display_name || teacherGroups[0].name}
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="text-sm text-gray-500 py-2">
+              No classes assigned for {selectedYear || 'this year'}. Contact admin to get assigned.
             </div>
           )
-        ) : isTeacher ? (
-          <div className="text-sm text-gray-500 py-2">
-            No classes assigned for {selectedYear || 'this year'}. Contact admin to get assigned.
-          </div>
         ) : (
           <>
             <div>
@@ -563,24 +602,27 @@ export default function Attendance() {
 
                       {/* Status buttons — bigger touch targets */}
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {['Present', 'Absent', 'Leave'].map(opt => (
-                          <button key={opt}
-                            onClick={() => handleQuickMark(s.student, opt)}
-                            className={`w-11 h-11 md:w-10 md:h-10 rounded-xl text-base font-bold border-2 transition-all active:scale-95 ${
-                              status === opt
-                                ? `${STATUS_STYLE[opt].btn} shadow-lg scale-105 border-transparent`
-                                : 'bg-white border-gray-200 text-gray-300 hover:border-gray-400 hover:text-gray-500'
-                            }`}
-                            title={STATUS_STYLE[opt].label}>
-                            {STATUS_STYLE[opt].icon}
-                          </button>
-                        ))}
+                        {['Present', 'Absent', 'Leave'].map(opt => {
+                          const isMatch = status && status.toLowerCase() === opt.toLowerCase();
+                          return (
+                            <button key={opt}
+                              onClick={() => handleQuickMark(s.student, opt)}
+                              className={`w-11 h-11 md:w-10 md:h-10 rounded-xl text-base font-bold border-2 transition-all active:scale-95 ${
+                                isMatch
+                                  ? `${STATUS_STYLE[opt].btn} shadow-lg scale-105 border-transparent`
+                                  : 'bg-white border-gray-200 text-gray-300 hover:border-gray-400 hover:text-gray-500'
+                              }`}
+                              title={STATUS_STYLE[opt].label}>
+                              {STATUS_STYLE[opt].icon}
+                            </button>
+                          );
+                        })}
                       </div>
 
                       {/* Status pill (desktop only) */}
                       {status && (
-                        <span className={`hidden lg:inline-block text-xs font-semibold px-2.5 py-1 rounded-full border w-20 text-center shrink-0 ${STATUS_STYLE[status].pill}`}>
-                          {status}
+                        <span className={`hidden lg:inline-block text-xs font-semibold px-2.5 py-1 rounded-full border w-20 text-center shrink-0 ${STATUS_STYLE[status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()]?.pill || 'bg-gray-100 text-gray-700 border-gray-200'}`}>
+                          {STATUS_STYLE[status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()]?.label || status}
                         </span>
                       )}
                     </div>

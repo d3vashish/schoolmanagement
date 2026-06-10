@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -24,6 +24,7 @@ class Class(Base, TimestampMixin):
     order = Column(Integer, nullable=False)
 
     sections = relationship("Section", back_populates="class_")
+    class_subjects = relationship("ClassSubject", back_populates="class_", cascade="all, delete-orphan")
 
 
 class Section(Base, TimestampMixin):
@@ -45,13 +46,26 @@ class Subject(Base, TimestampMixin):
     name = Column(String(100), nullable=False)
     code = Column(String(20), unique=True, nullable=False)
     is_graded = Column(Boolean, default=True, nullable=False)
+    department = Column(String(100), nullable=True)
+    description = Column(Text, nullable=True)
+    credit_hours = Column(Integer, nullable=True)
+    lab_fee_amount = Column(Integer, nullable=True)
+    grading_scheme_id = Column(UUID(as_uuid=True), ForeignKey("grading_schemes.id", ondelete="SET NULL"), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
 
 
 class ClassSubject(Base, TimestampMixin):
     __tablename__ = "class_subjects"
 
-    class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id"), nullable=False)
-    subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id"), nullable=False)
+    class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id", ondelete="CASCADE"), nullable=False)
+    subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id", ondelete="CASCADE"), nullable=False)
+
+    class_ = relationship("Class", back_populates="class_subjects")
+    subject = relationship("Subject")
+
+    __table_args__ = (
+        UniqueConstraint("class_id", "subject_id", name="uq_class_subject"),
+    )
 
 
 class Holiday(Base, TimestampMixin):
@@ -73,6 +87,23 @@ class AcademicProgression(Base, TimestampMixin):
     is_retained = Column(Boolean, default=False, nullable=False)
     promoted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     promoted_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class Enrollment(Base, TimestampMixin):
+    __tablename__ = "enrollments"
+
+    student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id", ondelete="CASCADE"), nullable=False, index=True)
+    class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id", ondelete="CASCADE"), nullable=False)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="CASCADE"), nullable=True)
+    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="CASCADE"), nullable=False)
+    roll_number = Column(String(20), nullable=True)
+    status = Column(String(20), nullable=False, default="ACTIVE", index=True)
+    enrolled_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    left_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("student_id", "academic_year_id", name="uq_enrollment_student_year"),
+    )
 
 
 class TeacherAssignment(Base, TimestampMixin):

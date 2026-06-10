@@ -43,8 +43,9 @@ class Exam(Base, TimestampMixin):
     __tablename__ = "exams"
 
     name = Column(String(100), nullable=False)
-    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id"), nullable=False)
+    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="SET NULL"), nullable=True, index=True)
     class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id"), nullable=False)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
     grading_scheme_id = Column(UUID(as_uuid=True), ForeignKey("grading_schemes.id"), nullable=True)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
@@ -70,6 +71,7 @@ class ExamResult(Base, TimestampMixin, VersionMixin):
     exam_id = Column(UUID(as_uuid=True), ForeignKey("exams.id"), nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False, index=True)
     subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id"), nullable=False)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
     marks = Column(Numeric(5, 2), nullable=True)
     max_marks = Column(Numeric(5, 2), nullable=False)
     is_absent = Column(Boolean, default=False, nullable=False)
@@ -85,6 +87,7 @@ class ExamAggregate(Base, TimestampMixin):
 
     exam_id = Column(UUID(as_uuid=True), ForeignKey("exams.id"), nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False, index=True)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
     total_marks = Column(Numeric(10, 2), nullable=False)
     max_total = Column(Numeric(10, 2), nullable=False)
     percentage = Column(Numeric(5, 2), nullable=False)
@@ -101,6 +104,7 @@ class ReportCard(Base, TimestampMixin):
 
     exam_id = Column(UUID(as_uuid=True), ForeignKey("exams.id", ondelete="CASCADE"), nullable=False)
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id", ondelete="CASCADE"), nullable=False)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
     file_url = Column(String(500), nullable=False)
     generated_at = Column(Date, nullable=True)
 

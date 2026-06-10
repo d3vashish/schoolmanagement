@@ -79,6 +79,7 @@ class UserResponse(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     employee_id: str | None = None
+    designation: str | None = None
     department: str | None = None
     qualification: str | None = None
     admission_number: str | None = None

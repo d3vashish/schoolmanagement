@@ -60,14 +60,30 @@ class StudentDiscount(Base, TimestampMixin):
     reason = Column(Text, nullable=True)
 
 
+class StudentLedgerEntry(Base, TimestampMixin):
+    __tablename__ = "student_ledger_entries"
+
+    student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False, index=True)
+    entry_type = Column(String(20), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    ref_type = Column(String(30), nullable=False)
+    ref_id = Column(UUID(as_uuid=True), nullable=True)
+    description = Column(Text, nullable=True)
+    running_balance = Column(Numeric(10, 2), nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+
 class Invoice(Base, TimestampMixin):
     __tablename__ = "invoices"
 
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False, index=True)
+    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
+    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="SET NULL"), nullable=True, index=True)
     installment_id = Column(UUID(as_uuid=True), ForeignKey("fee_installments.id"), nullable=False)
     gross_amount = Column(Numeric(10, 2), nullable=False)
     discount_amount = Column(Numeric(10, 2), nullable=False)
     net_amount = Column(Numeric(10, 2), nullable=False)
+    paid_amount = Column(Numeric(10, 2), default=0)
     due_date = Column(Date, nullable=False)
     status = Column(String(20), nullable=False, default="PENDING", index=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
@@ -76,6 +92,28 @@ class Invoice(Base, TimestampMixin):
     razorpay_order_id = Column(String(100), nullable=True)
     razorpay_payment_id = Column(String(100), nullable=True)
     receipt_url = Column(Text, nullable=True)
+
+
+class Payment(Base, TimestampMixin):
+    __tablename__ = "payments"
+
+    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    mode = Column(String(20), nullable=False)
+    reference_no = Column(String(100), nullable=True)
+    received_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    notes = Column(Text, nullable=True)
+
+
+class JournalEntry(Base, TimestampMixin):
+    __tablename__ = "journal_entries"
+
+    student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False)
+    description = Column(Text, nullable=False)
+    debit_amount = Column(Numeric(10, 2), default=0)
+    credit_amount = Column(Numeric(10, 2), default=0)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    status = Column(String(20), default="PENDING")
 
 
 class PaymentOrder(Base, TimestampMixin):
