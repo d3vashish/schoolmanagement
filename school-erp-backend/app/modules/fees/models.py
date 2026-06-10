@@ -83,7 +83,7 @@ class Invoice(Base, TimestampMixin):
     gross_amount = Column(Numeric(10, 2), nullable=False)
     discount_amount = Column(Numeric(10, 2), nullable=False)
     net_amount = Column(Numeric(10, 2), nullable=False)
-    paid_amount = Column(Numeric(10, 2), default=0)
+    paid_amount = Column(Numeric(10, 2), default=0, nullable=False)
     due_date = Column(Date, nullable=False)
     status = Column(String(20), nullable=False, default="PENDING", index=True)
     paid_at = Column(DateTime(timezone=True), nullable=True)
@@ -110,8 +110,8 @@ class JournalEntry(Base, TimestampMixin):
 
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False)
     description = Column(Text, nullable=False)
-    debit_amount = Column(Numeric(10, 2), default=0)
-    credit_amount = Column(Numeric(10, 2), default=0)
+    debit_amount = Column(Numeric(10, 2), default=0, nullable=False)
+    credit_amount = Column(Numeric(10, 2), default=0, nullable=False)
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     status = Column(String(20), default="PENDING")
 
