@@ -1,3 +1,4 @@
+import { client } from '../api/frappe';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getList, getDoc, getListStrict, getDocStrict, createDoc, updateDoc, deleteDoc, callMethod } from '../api/frappe';
 
@@ -430,5 +431,124 @@ export function useUpdateConcessionRequest() {
   return useMutation({
     mutationFn: ({ name, data }) => updateDoc('Fee Concession Request', name, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Concession Request'] }),
+  });
+}
+
+// ── Fee Ledger ─────────────────────────────────────────────────────────────
+
+export function useStudentLedger(studentId, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'ledger', studentId],
+    queryFn: async () => {
+      const res = await client.get(`/fees/ledger/${studentId}`, {
+        params: { limit: 100, offset: 0 },
+      });
+      return res.data;
+    },
+    enabled: !!studentId,
+    ...options,
+  });
+}
+
+export function useLedgerSummary(studentId, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'ledger-summary', studentId],
+    queryFn: async () => {
+      const res = await client.get(`/fees/ledger/${studentId}/summary`);
+      return res.data;
+    },
+    enabled: !!studentId,
+    ...options,
+  });
+}
+
+export function useRecordPayment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data) => {
+      const res = await client.post('/fees/payments', data);
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fees'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'invoice'] });
+    },
+  });
+}
+
+export function usePaymentsList(invoiceId, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'payments', invoiceId],
+    queryFn: async () => {
+      const res = await client.get('/fees/payments', {
+        params: invoiceId ? { invoice_id: invoiceId } : {},
+      });
+      return res.data;
+    },
+    ...options,
+  });
+}
+
+export function useCreateJournalEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data) => {
+      const res = await client.post('/fees/journal-entries', data);
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger'] });
+    },
+  });
+}
+
+export function useJournalEntries(studentId, filters = {}, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'journal-entries', studentId, filters],
+    queryFn: async () => {
+      const params = {};
+      if (studentId) params.student_id = studentId;
+      if (filters.status) params.status = filters.status;
+      const res = await client.get('/fees/journal-entries', { params });
+      return res.data;
+    },
+    ...options,
+  });
+}
+
+export function useApproveJournalEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ entryId, status }) => {
+      const res = await client.post(`/fees/journal-entries/${entryId}/approve`, { status });
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'journal-entries'] });
+    },
+  });
+}
+
+export function useDefaulterReport(filters = {}, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'defaulters', filters],
+    queryFn: async () => {
+      const res = await client.get('/fees/reports/defaulters', { params: filters });
+      return res.data;
+    },
+    ...options,
+  });
+}
+
+export function useCollectionReport(filters = {}, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'collections', filters],
+    queryFn: async () => {
+      const res = await client.get('/fees/reports/collections', { params: filters });
+      return res.data;
+    },
+    ...options,
   });
 }
