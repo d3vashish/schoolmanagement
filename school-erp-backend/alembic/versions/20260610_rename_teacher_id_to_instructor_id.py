@@ -1,7 +1,7 @@
 """rename teacher_id to instructor_id on timetable_slots
 
 Revision ID: 20260610_rename_teacher_id_to_instructor_id
-Revises: 7894d2594234
+Revises: 8163bde347c8
 Create Date: 2026-06-10 10:00:00.000000
 
 """
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision: str = "20260610_rename_teacher_id_to_instructor_id"
-down_revision: Union[str, None] = "7894d2594234"
+down_revision: Union[str, None] = "8163bde347c8"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

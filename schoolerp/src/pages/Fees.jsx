@@ -8,6 +8,8 @@ const FeePayments = lazy(() => import('../components/fees/FeePayments'));
 const FeeStudentView = lazy(() => import('../components/fees/FeeStudentView'));
 const FeeConcessions = lazy(() => import('../components/fees/FeeConcessions'));
 const FeeSchedules = lazy(() => import('../components/fees/FeeSchedules'));
+const DefaulterList = lazy(() => import('../components/fees/DefaulterList'));
+const CollectionReport = lazy(() => import('../components/fees/CollectionReport'));
 const GenerateFeesModal = lazy(() => import('../components/fees/GenerateFeesModal'));
 
 const TABS = [
@@ -18,6 +20,8 @@ const TABS = [
   { key: 'students',    label: 'Students',    icon: '👤' },
   { key: 'concessions', label: 'Concessions', icon: '🏷️' },
   { key: 'schedules',  label: 'Schedules',  icon: '📅' },
+  { key: 'defaulters', label: 'Defaulters', icon: '⚠️' },
+  { key: 'collections', label: 'Collections', icon: '📈' },
 ];
 
 export default function Fees() {
@@ -80,6 +84,8 @@ export default function Fees() {
         {activeTab === 'students' && <FeeStudentView />}
         {activeTab === 'concessions' && <FeeConcessions />}
         {activeTab === 'schedules' && <FeeSchedules />}
+        {activeTab === 'defaulters' && <DefaulterList />}
+        {activeTab === 'collections' && <CollectionReport />}
       </Suspense>
 
       {/* Generate Fees Modal */}
