@@ -441,3 +441,69 @@ class QueryScoper:
             return PaymentOrder.invoice_id.in_(invoice_ids)
 
         return None
+
+    @staticmethod
+    def for_ledger(db, current_user: dict) -> Optional[BinaryExpression]:
+        from app.modules.auth.models import StudentProfile
+        from app.modules.fees.models import StudentLedgerEntry
+        from app.modules.parent.models import ParentStudentLink
+
+        role = current_user["role"]
+        uid = current_user["id"]
+
+        if role in ("super_admin", "principal", "accountant", "librarian"):
+            return None
+
+        if role == "teacher":
+            from sqlalchemy import or_
+            from app.modules.academic.models import (
+                Enrollment,
+                Section,
+                TeacherAssignment,
+            )
+
+            ta = TeacherAssignment.__table__.alias()
+            ta_subq = (
+                select(ta.c.section_id)
+                .where(ta.c.instructor_id == uid)
+                .subquery()
+            )
+            sec = Section.__table__.alias()
+            ct_subq = (
+                select(sec.c.id)
+                .where(sec.c.class_teacher_id == uid)
+                .subquery()
+            )
+            enrollment = Enrollment.__table__.alias()
+            student_ids = (
+                select(StudentProfile.id)
+                .where(
+                    StudentProfile.id == enrollment.c.student_id,
+                    or_(
+                        enrollment.c.section_id.in_(ta_subq),
+                        enrollment.c.section_id.in_(ct_subq),
+                    ),
+                    enrollment.c.status == "ACTIVE",
+                )
+                .subquery()
+            )
+            return StudentLedgerEntry.student_id.in_(student_ids)
+
+        if role == "student":
+            sp = (
+                select(StudentProfile.id)
+                .where(StudentProfile.user_id == uid)
+                .scalar_subquery()
+            )
+            return StudentLedgerEntry.student_id == sp
+
+        if role == "parent":
+            psl = ParentStudentLink.__table__.alias()
+            child_ids = (
+                select(psl.c.student_id)
+                .where(psl.c.parent_id == uid)
+                .subquery()
+            )
+            return StudentLedgerEntry.student_id.in_(child_ids)
+
+        return None
