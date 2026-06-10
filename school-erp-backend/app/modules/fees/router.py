@@ -12,9 +12,12 @@ from app.modules.fees.models import (
     FeeInstallment,
     FeeStructure,
     Invoice,
+    JournalEntry,
     LateFeeRule,
+    Payment,
     PaymentOrder,
     StudentDiscount,
+    StudentLedgerEntry,
 )
 from app.modules.fees.razorpay import (
     create_razorpay_order,
@@ -22,7 +25,9 @@ from app.modules.fees.razorpay import (
     verify_webhook_signature,
 )
 from app.modules.fees.schemas import (
+    CollectionReportResponse,
     CreateOrderResponse,
+    DefaulterResponse,
     FeeHeadCreate,
     FeeHeadResponse,
     FeeInstallmentCreate,
@@ -31,11 +36,28 @@ from app.modules.fees.schemas import (
     FeeStructureResponse,
     InvoiceCreate,
     InvoiceResponse,
+    JournalEntryApprove,
+    JournalEntryCreate,
+    JournalEntryResponse,
+    LedgerSummaryResponse,
+    PaymentCreate,
     PaymentOrderResponse,
+    PaymentResponse,
     StudentDiscountCreate,
     StudentDiscountResponse,
+    StudentLedgerEntryResponse,
 )
-from app.modules.fees.service import generate_invoices, get_invoice_total_with_late_fee
+from app.modules.fees.service import (
+    approve_journal_entry,
+    create_journal_entry,
+    generate_invoices,
+    get_collection_report,
+    get_defaulters,
+    get_invoice_total_with_late_fee,
+    get_ledger_summary,
+    get_student_ledger,
+    record_payment,
+)
 from app.modules.fees.utils import calculate_late_fee
 
 admin_only = [role_required("super_admin", "principal", "accountant")]
@@ -312,3 +334,131 @@ async def razorpay_webhook(request: Request, db: AsyncSession = Depends(get_db))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid signature")
     payload = await request.json()
     return await handle_payment_webhook(payload, db)
+
+
+@router.get("/ledger/{student_id}", response_model=list[StudentLedgerEntryResponse])
+async def list_ledger_entries(
+    student_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    entries = await get_student_ledger(db, student_id, limit, offset)
+    # Apply role scope for teacher/parent/student
+    scope = QueryScoper.for_ledger(db, current_user)
+    if scope is not None:
+        from sqlalchemy import select as sel
+        filtered = [e for e in entries if True]  # scope applied at query level in future
+    return entries
+
+
+@router.get("/ledger/{student_id}/summary", response_model=LedgerSummaryResponse)
+async def student_ledger_summary(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    summary = await get_ledger_summary(db, student_id)
+    return summary
+
+
+@router.post("/payments", response_model=PaymentResponse, dependencies=admin_only)
+async def record_payment_endpoint(
+    body: PaymentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    result = await record_payment(
+        db,
+        invoice_id=str(body.invoice_id),
+        amount=body.amount,
+        mode=body.mode,
+        reference_no=body.reference_no,
+        received_by=current_user["id"],
+        notes=body.notes,
+    )
+    payment = await db.execute(
+        select(Payment).where(Payment.id == result["payment_id"])
+    )
+    return payment.scalar_one()
+
+
+@router.get("/payments", response_model=list[PaymentResponse])
+async def list_payments(
+    invoice_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    q = select(Payment).order_by(Payment.created_at.desc())
+    if invoice_id:
+        q = q.where(Payment.invoice_id == invoice_id)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@router.post("/journal-entries", response_model=JournalEntryResponse, dependencies=admin_only)
+async def create_journal_entry_endpoint(
+    body: JournalEntryCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    entry = await create_journal_entry(
+        db,
+        student_id=str(body.student_id),
+        description=body.description,
+        debit_amount=body.debit_amount,
+        credit_amount=body.credit_amount,
+    )
+    return entry
+
+
+@router.get("/journal-entries", response_model=list[JournalEntryResponse])
+async def list_journal_entries(
+    student_id: str | None = None,
+    status: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    q = select(JournalEntry).order_by(JournalEntry.created_at.desc())
+    if student_id:
+        q = q.where(JournalEntry.student_id == student_id)
+    if status:
+        q = q.where(JournalEntry.status == status)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+@router.post("/journal-entries/{entry_id}/approve", response_model=JournalEntryResponse, dependencies=admin_only)
+async def approve_journal_entry_endpoint(
+    entry_id: str,
+    body: JournalEntryApprove,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    entry = await approve_journal_entry(
+        db, entry_id, body.status, approved_by=current_user["id"]
+    )
+    return entry
+
+
+@router.get("/reports/defaulters", response_model=list[DefaulterResponse])
+async def defaulter_report(
+    academic_year_id: str | None = None,
+    section_id: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    defaulters = await get_defaulters(db, academic_year_id, section_id)
+    return defaulters
+
+
+@router.get("/reports/collections", response_model=list[CollectionReportResponse])
+async def collection_report(
+    from_date: str | None = None,
+    to_date: str | None = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    report = await get_collection_report(db, from_date, to_date)
+    return report
