@@ -126,3 +126,88 @@ class RazorpayWebhookPayload(BaseModel):
     razorpay_payment_id: str
     razorpay_order_id: str
     status: str
+
+
+class StudentLedgerEntryResponse(BaseModel):
+    id: UUID
+    student_id: UUID
+    entry_type: str
+    amount: Decimal
+    ref_type: str
+    ref_id: UUID | None
+    description: str | None
+    running_balance: Decimal
+    created_by: UUID | None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class PaymentCreate(BaseModel):
+    invoice_id: UUID
+    amount: Decimal
+    mode: str
+    reference_no: str | None = None
+    notes: str | None = None
+
+
+class PaymentResponse(BaseModel):
+    id: UUID
+    invoice_id: UUID
+    amount: Decimal
+    mode: str
+    reference_no: str | None
+    received_by: UUID
+    notes: str | None
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class JournalEntryCreate(BaseModel):
+    student_id: UUID
+    description: str
+    debit_amount: Decimal = Decimal("0")
+    credit_amount: Decimal = Decimal("0")
+
+
+class JournalEntryResponse(BaseModel):
+    id: UUID
+    student_id: UUID
+    description: str
+    debit_amount: Decimal
+    credit_amount: Decimal
+    approved_by: UUID | None
+    status: str
+    created_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class JournalEntryApprove(BaseModel):
+    status: str
+
+
+class LedgerSummaryResponse(BaseModel):
+    student_id: UUID
+    total_due: Decimal
+    total_paid: Decimal
+    balance: Decimal
+    last_entry_date: datetime | None = None
+
+
+class DefaulterResponse(BaseModel):
+    student_id: UUID
+    student_name: str
+    section: str
+    total_due: Decimal
+    total_paid: Decimal
+    balance: Decimal
+    overdue_count: int
+
+
+class CollectionReportResponse(BaseModel):
+    date: date
+    total_collected: Decimal
+    payment_count: int
+    mode_breakdown: dict | None = None
