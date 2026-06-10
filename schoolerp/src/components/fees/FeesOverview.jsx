@@ -267,8 +267,10 @@ export default function FeesOverview({ onNavigate }) {
       {/* Quick Actions */}
       <div className="card">
         <h3 className="font-bold text-[var(--color-text)] mb-4">Quick Actions</h3>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
           {[
+            { label: 'Defaulters', icon: '⚠️', tab: 'defaulters', desc: 'View overdue students' },
+            { label: 'Collections', icon: '📈', tab: 'collections', desc: 'Daily collection report' },
             { label: 'New Invoice', icon: '🧾', tab: 'invoices', desc: 'Create fee invoice' },
             { label: 'Record Payment', icon: '💰', tab: 'payments', desc: 'Record fee payment' },
             { label: 'Generate Fees', icon: '⚡', tab: 'invoices', desc: 'Batch generate from structure' },
