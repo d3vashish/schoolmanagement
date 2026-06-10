@@ -9,6 +9,7 @@ import {
 import StatusBadge from './StatusBadge';
 import CreateFeeModal from './CreateFeeModal';
 import ConcessionRequestModal from './ConcessionRequestModal';
+import RecordPaymentModal from './RecordPaymentModal';
 
 export default function FeeInvoices() {
   const { selectedYear } = useAcademicYear();
@@ -24,6 +25,7 @@ export default function FeeInvoices() {
   const [dismissed, setDismissed] = useState(false);
   const [lateFeeTarget, setLateFeeTarget] = useState(null); // { fee, amount, category }
   const [concessionTarget, setConcessionTarget] = useState(null); // { student, fees }
+  const [paymentTarget, setPaymentTarget] = useState(null);
   const [lateFeeError, setLateFeeError] = useState('');
 
   const yearFilter = selectedYear ? [['academic_year', '=', selectedYear]] : [];
@@ -249,9 +251,9 @@ export default function FeeInvoices() {
             className="mt-3 text-sm text-[var(--color-primary)] hover:underline">Clear filters</button>
         </div>
       ) : view === 'table' ? (
-        <TableView fees={filtered} onSelect={setSelected} structureMap={structureMap} onLateFee={setLateFeeTarget} onConcession={setConcessionTarget} />
+        <TableView fees={filtered} onSelect={setSelected} structureMap={structureMap} onLateFee={setLateFeeTarget} onConcession={setConcessionTarget} onPayment={setPaymentTarget} />
       ) : (
-        <CardsView fees={filtered} onSelect={setSelected} structureMap={structureMap} onLateFee={setLateFeeTarget} onConcession={setConcessionTarget} />
+        <CardsView fees={filtered} onSelect={setSelected} structureMap={structureMap} onLateFee={setLateFeeTarget} onConcession={setConcessionTarget} onPayment={setPaymentTarget} />
       )}
 
       {/* Detail panel */}
@@ -286,6 +288,16 @@ export default function FeeInvoices() {
           feesName={concessionTarget.fees}
           onClose={() => setConcessionTarget(null)}
           onCreated={() => { setConcessionTarget(null); queryClient.invalidateQueries({ queryKey: ['Fee Concession Request'] }); }}
+        />
+      )}
+      {paymentTarget && (
+        <RecordPaymentModal
+          studentId={paymentTarget}
+          onClose={() => setPaymentTarget(null)}
+          onSaved={() => {
+            setPaymentTarget(null);
+            queryClient.invalidateQueries({ queryKey: ['Fees'] });
+          }}
         />
       )}
     </div>
@@ -342,7 +354,7 @@ function LateFeeConfirmDialog({ fee, amount, category, onConfirm, onCancel }) {
 
 // ── Table View ──────────────────────────────────────────────────────────────
 
-function TableView({ fees, onSelect, structureMap, onLateFee, onConcession }) {
+function TableView({ fees, onSelect, structureMap, onLateFee, onConcession, onPayment }) {
   return (
     <div className="card !p-0 overflow-hidden">
       <div className="overflow-x-auto">
@@ -400,6 +412,12 @@ function TableView({ fees, onSelect, structureMap, onLateFee, onConcession }) {
                           Concession
                         </button>
                       )}
+                        {(fee._status === 'Unpaid' || fee._status === 'Partial' || fee._status === 'Overdue') && (fee.effective_outstanding || 0) > 0 && (
+                          <button onClick={e => { e.stopPropagation(); onPayment?.(fee.student); }}
+                            className="text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 hover:bg-emerald-100 transition whitespace-nowrap">
+                            Pay
+                          </button>
+                        )}
                     </div>
                   </td>
                 </tr>
@@ -414,7 +432,7 @@ function TableView({ fees, onSelect, structureMap, onLateFee, onConcession }) {
 
 // ── Cards View ──────────────────────────────────────────────────────────────
 
-function CardsView({ fees, onSelect, structureMap, onLateFee, onConcession }) {
+function CardsView({ fees, onSelect, structureMap, onLateFee, onConcession, onPayment }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {fees.map(fee => {
@@ -466,6 +484,12 @@ function CardsView({ fees, onSelect, structureMap, onLateFee, onConcession }) {
                 <button onClick={e => { e.stopPropagation(); onConcession({ student: fee.student, fees: fee.name }); }}
                   className="w-full text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 hover:bg-blue-100 transition">
                   Request Concession
+                </button>
+              )}
+              {(fee._status === 'Unpaid' || fee._status === 'Partial' || fee._status === 'Overdue') && (fee.effective_outstanding || 0) > 0 && (
+                <button onClick={e => { e.stopPropagation(); onPayment?.(fee.student); }}
+                  className="w-full text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 hover:bg-emerald-100 transition">
+                  Record Payment
                 </button>
               )}
             </div>
