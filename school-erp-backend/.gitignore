@@ -6,3 +6,9 @@ __pycache__/
 .env
 *.log
 .pytest_cache/
+*.db
+scratch*.py
+get_users.py
+reset_passwords.py
+cookies.txt
+scripts/test_me.py

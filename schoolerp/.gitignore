@@ -12,3 +12,5 @@ memory.md
 MEMORY.md
 implementation_plan.md
 ARCHITECTURE_ANALYSIS.md
+color-migrate.ps1
+patch.py
