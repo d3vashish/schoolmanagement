@@ -11,6 +11,9 @@ export default function Topbar() {
   const [showProfile, setShowProfile] = useState(false);
   const [showYearDropdown, setShowYearDropdown] = useState(false);
 
+  // Resolve display name from UUID
+  const selectedYearName = academicYears.find(y => y.id === selectedYear)?.name || selectedYear || 'Select Year';
+
   return (
     <header className="flex items-center justify-between px-6 animate-in-down"
       style={{ height: '64px', background: '#F7F9FC' }}>
@@ -42,7 +45,7 @@ export default function Topbar() {
               <svg className="w-3.5 h-3.5 text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <span className="font-bold text-[#2ED05D]">{selectedYear || '—'}</span>
+              <span className="font-bold text-[#2ED05D]">{selectedYearName}</span>
             </div>
           ) : (
             <button onClick={() => setShowYearDropdown(o => !o)}
@@ -50,8 +53,8 @@ export default function Topbar() {
               <svg className="w-3.5 h-3.5 text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <span className="font-bold text-[#2ED05D]">{selectedYear || 'Select Year'}</span>
-              {!isCurrentYear && (
+              <span className="font-bold text-[#2ED05D]">{selectedYearName}</span>
+              {!isCurrentYear && selectedYear && (
                 <span className="px-1 py-0.5 bg-[#D1FAE5] text-[#047857] rounded text-[9px] font-bold">PREV</span>
               )}
               <svg className={`w-3 h-3 text-[#2ED05D] transition-transform ${showYearDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,11 +68,11 @@ export default function Topbar() {
               <div className="fixed inset-0 z-40" onClick={() => setShowYearDropdown(false)} />
               <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-lg z-50 p-1.5 border border-[#E2E8F0]">
                 {academicYears.map(y => (
-                  <button key={y.name}
-                    onClick={() => { setSelectedYear(y.name); setShowYearDropdown(false); }}
+                  <button key={y.id}
+                    onClick={() => { setSelectedYear(y.id); setShowYearDropdown(false); }}
                     className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-all cursor-pointer text-[#475569] hover:bg-[#E8F9ED]">
                     <span>{y.name}</span>
-                    {y.name === currentYear && (
+                    {y.is_active && (
                       <span className="px-1.5 py-0.5 bg-[#E8F9ED] text-[#2ED05D] rounded text-[9px] font-bold">Now</span>
                     )}
                   </button>
@@ -96,10 +99,10 @@ export default function Topbar() {
           <button onClick={() => setShowProfile(o => !o)}
             className="flex items-center gap-2 px-2 py-1 rounded-[999px] hover:bg-[#E8F9ED] transition-all duration-200 cursor-pointer active:scale-[0.97] group">
             <div className="w-8 h-8 rounded-full bg-linear-to-br from-[#2ED05D] to-[#22C55E] flex items-center justify-center text-xs font-bold text-white">
-              {(user?.full_name || user?.usr || 'U').charAt(0).toUpperCase()}
+              {(user?.full_name || user?.usr || user?.email || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="text-left hidden sm:block">
-              <p className="text-xs font-semibold text-[#1F2A44] leading-tight">{user?.full_name || user?.usr || 'User'}</p>
+              <p className="text-xs font-semibold text-[#1F2A44] leading-tight">{user?.full_name || user?.email || 'User'}</p>
               <p className="text-[9px] text-[#94A3B8]">{roleLabel}</p>
             </div>
           </button>
@@ -109,8 +112,8 @@ export default function Topbar() {
               <div className="fixed inset-0 z-40" onClick={() => setShowProfile(false)} />
               <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-lg border border-[#E2E8F0] z-50 p-2">
                 <div className="px-3 py-2.5 border-b border-[#E2E8F0] mb-1">
-                  <p className="text-sm font-semibold text-[#1F2A44]">{user?.full_name || user?.usr}</p>
-                  <p className="text-xs text-[#94A3B8]">{user?.usr}</p>
+                  <p className="text-sm font-semibold text-[#1F2A44]">{user?.full_name || user?.email}</p>
+                  <p className="text-xs text-[#94A3B8]">{user?.email}</p>
                 </div>
                 <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm text-[#475569] hover:bg-[#E8F9ED] transition-all cursor-pointer group">
                   <svg className="w-4 h-4 text-[#64748B] group-hover:text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

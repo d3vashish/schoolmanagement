@@ -1694,11 +1694,7 @@ const ADMISSION_TRANSITIONS = {
   INQUIRY: ['APPLICATION_SUBMITTED'],
   APPLICATION_SUBMITTED: ['DOCUMENTS_PENDING'],
   DOCUMENTS_PENDING: ['DOCUMENTS_VERIFIED'],
-  DOCUMENTS_VERIFIED: ['TEST_SCHEDULED'],
-  TEST_SCHEDULED: ['TEST_COMPLETED'],
-  TEST_COMPLETED: ['INTERVIEW_SCHEDULED'],
-  INTERVIEW_SCHEDULED: ['INTERVIEW_COMPLETED'],
-  INTERVIEW_COMPLETED: ['FEE_PENDING'],
+  DOCUMENTS_VERIFIED: ['FEE_PENDING'],
   FEE_PENDING: ['ENROLLED'],
   ENROLLED: [],
 };
@@ -1708,7 +1704,7 @@ export function getAllowedTransitions(status) {
 }
 
 export async function getAdmissions(params = {}) {
-  const res = await client.get('/admissions', { params });
+  const res = await client.get('/admissions/', { params });
   let items = Array.isArray(res.data) ? res.data : res.data?.data || res.data?.results || [];
   return items.map(a => ({
     id: a.id || a.name,
@@ -1732,19 +1728,39 @@ export async function getAdmissions(params = {}) {
 }
 
 export async function createAdmission(data) {
-  const res = await client.post('/admissions', {
+  const res = await client.post('/admissions/', {
     applicant_name: data.applicant_name || '',
-    date_of_birth: data.date_of_birth || '',
-    gender: data.gender || '',
-    phone: data.phone || '',
-    email: data.email || '',
-    address: data.address || '',
-    class_applied: data.class_applied || '',
-    academic_year: data.academic_year || '',
-    previous_school: data.previous_school || '',
-    parent_name: data.parent_name || '',
-    parent_phone: data.parent_phone || '',
-    parent_email: data.parent_email || '',
+    applicant_phone: data.phone || data.applicant_phone || '',
+    applicant_email: data.applicant_email || '',
+    date_of_birth: data.date_of_birth || null,
+    gender: data.gender || null,
+    phone: data.phone || null,
+    address: data.address || null,
+    aadhar_number: data.aadhar_number || null,
+    category: data.category || null,
+    caste: data.caste || null,
+    religion: data.religion || null,
+    nationality: data.nationality || null,
+    blood_group: data.blood_group || null,
+    class_id: data.class_id || '',
+    academic_year_id: data.academic_year_id || '',
+    previous_school: data.previous_school || null,
+    previous_class: data.previous_class || null,
+    tc_number: data.tc_number || null,
+    father_name: data.father_name || null,
+    father_phone: data.father_phone || null,
+    father_email: data.father_email || null,
+    father_occupation: data.father_occupation || null,
+    father_aadhar: data.father_aadhar || null,
+    mother_name: data.mother_name || null,
+    mother_phone: data.mother_phone || null,
+    mother_email: data.mother_email || null,
+    mother_occupation: data.mother_occupation || null,
+    mother_aadhar: data.mother_aadhar || null,
+    parent_name: data.parent_name || null,
+    parent_phone: data.parent_phone || null,
+    parent_email: data.parent_email || null,
+    remarks: data.remarks || null,
   });
   return { id: res.data.id || res.data.name, ...res.data };
 }

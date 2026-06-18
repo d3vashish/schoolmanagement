@@ -57,7 +57,7 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
 
 @router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("30/minute")
 async def refresh(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     user_id = await consume_refresh_token(body.refresh_token)
     if not user_id:

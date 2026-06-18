@@ -68,6 +68,67 @@ all_auth = [Depends(get_current_user)]
 router = APIRouter(prefix="/academic", tags=["academic"])
 
 
+# ── Helper: fetch student row without Depends ─────────────────────────────────
+
+async def _fetch_student_row(student_id: str, db: AsyncSession):
+    enrollment_alias = Enrollment.__table__.alias()
+    academic_class_alias = AcademicClass.__table__.alias()
+    section_alias = Section.__table__.alias()
+
+    result = await db.execute(
+        select(
+            StudentProfile.id,
+            StudentProfile.user_id,
+            StudentProfile.first_name,
+            StudentProfile.last_name,
+            StudentProfile.date_of_birth,
+            StudentProfile.admission_number,
+            StudentProfile.guardian_name,
+            StudentProfile.guardian_phone,
+            StudentProfile.address,
+            StudentProfile.created_at,
+            academic_class_alias.c.name.label("student_group_name"),
+            section_alias.c.name.label("section_name"),
+            enrollment_alias.c.class_id,
+            enrollment_alias.c.section_id,
+            enrollment_alias.c.roll_number,
+            User.email,
+            User.is_active,
+        ).join(User, StudentProfile.user_id == User.id)
+        .outerjoin(enrollment_alias, sa_and_(
+            enrollment_alias.c.student_id == StudentProfile.id,
+            enrollment_alias.c.status == "ACTIVE",
+        ))
+        .outerjoin(academic_class_alias, enrollment_alias.c.class_id == academic_class_alias.c.id)
+        .outerjoin(section_alias, enrollment_alias.c.section_id == section_alias.c.id)
+        .where(StudentProfile.id == student_id)
+    )
+    return result.one_or_none()
+
+
+def _row_to_student_response(row) -> StudentProfileResponse:
+    return StudentProfileResponse(
+        id=row.id,
+        user_id=row.user_id,
+        first_name=row.first_name,
+        last_name=row.last_name,
+        date_of_birth=row.date_of_birth,
+        admission_number=row.admission_number,
+        student_group_name=row.student_group_name,
+        section_name=row.section_name,
+        guardian_name=row.guardian_name,
+        guardian_phone=row.guardian_phone,
+        address=row.address,
+        email=row.email,
+        student_email_id=row.email,
+        student_email=row.email,
+        is_active=row.is_active,
+        enabled=(1 if row.is_active else 0) if row.is_active is not None else None,
+        student_name=f"{row.first_name} {row.last_name}".strip(),
+        creation=row.created_at,
+    )
+
+
 @router.get("/years", response_model=list[AcademicYearResponse])
 async def list_years(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AcademicYear).order_by(AcademicYear.start_date.desc()))
@@ -77,9 +138,6 @@ async def list_years(db: AsyncSession = Depends(get_db)):
 @router.post("/years", response_model=AcademicYearResponse, dependencies=[admin_only])
 async def create_year(body: AcademicYearCreate, db: AsyncSession = Depends(get_db)):
     if body.is_active:
-        await db.execute(
-            select(AcademicYear).where(AcademicYear.is_active.is_(True))
-        )
         active = (await db.execute(select(AcademicYear).where(AcademicYear.is_active.is_(True)))).scalar_one_or_none()
         if active:
             active.is_active = False
@@ -181,7 +239,10 @@ async def list_subjects(db: AsyncSession = Depends(get_db)):
 
 @router.post("/subjects", response_model=SubjectResponse, dependencies=[admin_only])
 async def create_subject(body: SubjectCreate, db: AsyncSession = Depends(get_db)):
-    subject = Subject(**body.model_dump())
+    data = body.model_dump()
+    if not data.get("code"):        # ← if code is empty or None
+        data["code"] = None         # ← save as NULL not ""
+    subject = Subject(**data)
     db.add(subject)
     try:
         await db.flush()
@@ -233,7 +294,7 @@ async def get_class_subjects(class_id: str, db: AsyncSession = Depends(get_db)):
     return [
         ClassSubjectResponse(
             id=cs.id, class_id=cs.class_id, subject_id=cs.subject_id,
-            subject_name=subj.name, subject_code=subj.code,
+            subject_name=subj.name, subject_code=subj.code or None,
         )
         for cs, subj in rows
     ]
@@ -284,8 +345,7 @@ async def get_class_detail(class_id: str, db: AsyncSession = Depends(get_db)):
     cls = await db.get(Class, class_id)
     if not cls:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
-    
-    # Get linked subjects
+
     subj_result = await db.execute(
         select(ClassSubject, Subject)
         .join(Subject, ClassSubject.subject_id == Subject.id)
@@ -295,19 +355,17 @@ async def get_class_detail(class_id: str, db: AsyncSession = Depends(get_db)):
     subjects = [
         ClassSubjectResponse(
             id=cs.id, class_id=cs.class_id, subject_id=cs.subject_id,
-            subject_name=subj.name, subject_code=subj.code,
+            subject_name=subj.name, subject_code=subj.code or None,
         )
         for cs, subj in subj_result.all()
     ]
-    
-    # Get sections
+
     sec_result = await db.execute(
         select(Section).options(joinedload(Section.academic_year))
         .where(Section.class_id == class_id)
         .order_by(Section.name)
     )
     sections_raw = sec_result.unique().scalars().all()
-    from app.modules.academic.schemas import SectionResponse
     sections = [
         SectionResponse(
             id=s.id, class_id=s.class_id, name=s.name, capacity=s.capacity,
@@ -317,7 +375,7 @@ async def get_class_detail(class_id: str, db: AsyncSession = Depends(get_db)):
         )
         for s in sections_raw
     ]
-    
+
     return ClassDetailResponse(
         id=cls.id, name=cls.name, order=cls.order,
         subjects=subjects, sections=sections,
@@ -518,191 +576,6 @@ async def list_instructors(db: AsyncSession = Depends(get_db)):
 
 # ── Student Single CRUD ───────────────────────────────────────────────────
 
-
-@router.get("/students/{student_id}", response_model=StudentProfileResponse)
-async def get_student(
-    student_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    enrollment_alias = Enrollment.__table__.alias()
-    academic_class_alias = AcademicClass.__table__.alias()
-    section_alias = Section.__table__.alias()
-
-    result = await db.execute(
-        select(
-            StudentProfile.id,
-            StudentProfile.user_id,
-            StudentProfile.first_name,
-            StudentProfile.last_name,
-            StudentProfile.date_of_birth,
-            StudentProfile.admission_number,
-            StudentProfile.guardian_name,
-            StudentProfile.guardian_phone,
-            StudentProfile.address,
-            StudentProfile.created_at,
-            academic_class_alias.c.name.label("student_group_name"),
-            section_alias.c.name.label("section_name"),
-            enrollment_alias.c.class_id,
-            enrollment_alias.c.section_id,
-            enrollment_alias.c.roll_number,
-            User.email,
-            User.is_active,
-        ).join(User, StudentProfile.user_id == User.id)
-        .outerjoin(enrollment_alias, sa_and_(
-            enrollment_alias.c.student_id == StudentProfile.id,
-            enrollment_alias.c.status == "ACTIVE",
-        ))
-        .outerjoin(academic_class_alias, enrollment_alias.c.class_id == academic_class_alias.c.id)
-        .outerjoin(section_alias, enrollment_alias.c.section_id == section_alias.c.id)
-        .where(StudentProfile.id == student_id)
-    )
-    row = result.one_or_none()
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-
-    # Scope check
-    role = current_user["role"]
-    uid = current_user["id"]
-    if role == "teacher":
-        ta = await db.execute(
-            select(TeacherAssignment).where(
-                TeacherAssignment.instructor_id == uid,
-                TeacherAssignment.section_id == row.section_id,
-            )
-        )
-        if not ta.first():
-            raise HTTPException(status_code=403, detail="Access denied")
-    elif role == "student":
-        sp = await db.execute(
-            select(StudentProfile).where(
-                StudentProfile.user_id == uid,
-                StudentProfile.id == student_id,
-            )
-        )
-        if not sp.first():
-            raise HTTPException(status_code=403, detail="Access denied")
-    elif role == "parent":
-        from app.modules.parent.models import ParentStudentLink
-        p = await db.execute(
-            select(ParentStudentLink).where(
-                ParentStudentLink.parent_id == uid,
-                ParentStudentLink.student_id == student_id,
-            )
-        )
-        if not p.first():
-            raise HTTPException(status_code=403, detail="Access denied")
-
-    return StudentProfileResponse(
-        id=row.id,
-        user_id=row.user_id,
-        first_name=row.first_name,
-        last_name=row.last_name,
-        date_of_birth=row.date_of_birth,
-        admission_number=row.admission_number,
-        student_group_name=row.student_group_name,
-        section_name=row.section_name,
-        guardian_name=row.guardian_name,
-        guardian_phone=row.guardian_phone,
-        address=row.address,
-        email=row.email,
-        is_active=row.is_active,
-        creation=row.created_at,
-    )
-
-
-@router.post("/students", response_model=StudentProfileResponse, dependencies=[admin_only])
-async def create_student(body: StudentCreate, db: AsyncSession = Depends(get_db)):
-    existing = await db.execute(select(User).where(User.email == body.email, User.deleted_at.is_(None)))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    user = User(
-        email=body.email,
-        hashed_pw=hash_password(body.password),
-        role="student",
-        is_active=True,
-    )
-    db.add(user)
-    await db.flush()
-    profile = StudentProfile(
-        user_id=user.id,
-        first_name=body.first_name,
-        last_name=body.last_name,
-        date_of_birth=body.date_of_birth,
-        admission_number=f"STU-{user.id}"[:50],
-        guardian_name=body.guardian_name,
-        guardian_phone=body.guardian_phone,
-        address=body.address,
-    )
-    db.add(profile)
-    await db.flush()
-
-    if body.class_id and body.academic_year_id:
-        cls = await db.get(Class, body.class_id)
-        if not cls:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
-        year = await db.get(AcademicYear, body.academic_year_id)
-        if not year:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
-        enrollment = Enrollment(
-            student_id=profile.id,
-            class_id=body.class_id,
-            academic_year_id=body.academic_year_id,
-            status="ACTIVE",
-        )
-        db.add(enrollment)
-        await db.flush()
-
-    return await get_student(str(profile.id), db)
-
-
-@router.patch("/students/{student_id}", response_model=StudentProfileResponse, dependencies=[admin_only])
-async def update_student(student_id: str, body: StudentUpdate, db: AsyncSession = Depends(get_db)):
-    profile = await db.get(StudentProfile, student_id)
-    if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-    if body.first_name is not None:
-        profile.first_name = body.first_name
-    if body.last_name is not None:
-        profile.last_name = body.last_name
-    if body.date_of_birth is not None:
-        profile.date_of_birth = body.date_of_birth
-    if body.guardian_name is not None:
-        profile.guardian_name = body.guardian_name
-    if body.guardian_phone is not None:
-        profile.guardian_phone = body.guardian_phone
-    if body.address is not None:
-        profile.address = body.address
-    user = await db.get(User, profile.user_id)
-    if user and body.is_active is not None:
-        user.is_active = body.is_active
-    await db.flush()
-    return await get_student(student_id, db)
-
-
-@router.delete("/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
-async def delete_student(
-    student_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    role = current_user["role"]
-    if role not in ("super_admin", "principal"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-
-    profile = await db.get(StudentProfile, student_id)
-    if not profile:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
-
-    user = await db.get(User, profile.user_id)
-    if role == "super_admin" and user:
-        user.deleted_at = datetime.now(timezone.utc)
-        user.is_active = False
-    elif role == "principal" and user:
-        user.is_active = False  # soft-delete only
-    await db.flush()
-
-
 @router.get("/students/search", response_model=list[StudentSearchResponse])
 async def search_students(
     q: str = "",
@@ -769,6 +642,149 @@ async def search_students(
         )
         for r in rows
     ]
+
+
+@router.get("/students/{student_id}", response_model=StudentProfileResponse)
+async def get_student(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    row = await _fetch_student_row(student_id, db)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    role = current_user["role"]
+    uid = current_user["id"]
+    if role == "teacher":
+        ta = await db.execute(
+            select(TeacherAssignment).where(
+                TeacherAssignment.instructor_id == uid,
+                TeacherAssignment.section_id == row.section_id,
+            )
+        )
+        if not ta.first():
+            raise HTTPException(status_code=403, detail="Access denied")
+    elif role == "student":
+        sp = await db.execute(
+            select(StudentProfile).where(
+                StudentProfile.user_id == uid,
+                StudentProfile.id == student_id,
+            )
+        )
+        if not sp.first():
+            raise HTTPException(status_code=403, detail="Access denied")
+    elif role == "parent":
+        from app.modules.parent.models import ParentStudentLink
+        p = await db.execute(
+            select(ParentStudentLink).where(
+                ParentStudentLink.parent_id == uid,
+                ParentStudentLink.student_id == student_id,
+            )
+        )
+        if not p.first():
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    return _row_to_student_response(row)
+
+
+@router.post("/students", response_model=StudentProfileResponse, dependencies=[admin_only])
+async def create_student(body: StudentCreate, db: AsyncSession = Depends(get_db)):
+    existing = await db.execute(select(User).where(User.email == body.email, User.deleted_at.is_(None)))
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    user = User(
+        email=body.email,
+        hashed_pw=hash_password(body.password),
+        role="student",
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    profile = StudentProfile(
+        user_id=user.id,
+        first_name=body.first_name,
+        last_name=body.last_name,
+        date_of_birth=body.date_of_birth,
+        admission_number=f"STU-{user.id}"[:50],
+        guardian_name=body.guardian_name,
+        guardian_phone=body.guardian_phone,
+        address=body.address,
+    )
+    db.add(profile)
+    await db.flush()
+
+    if body.class_id and body.academic_year_id:
+        cls = await db.get(Class, body.class_id)
+        if not cls:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Class not found")
+        year = await db.get(AcademicYear, body.academic_year_id)
+        if not year:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
+        enrollment = Enrollment(
+            student_id=profile.id,
+            class_id=body.class_id,
+            section_id=body.section_id or None,
+            academic_year_id=body.academic_year_id,
+            status="ACTIVE",
+        )
+        db.add(enrollment)
+        await db.flush()
+
+    row = await _fetch_student_row(str(profile.id), db)
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to fetch created student")
+    return _row_to_student_response(row)
+
+
+@router.patch("/students/{student_id}", response_model=StudentProfileResponse, dependencies=[admin_only])
+async def update_student(student_id: str, body: StudentUpdate, db: AsyncSession = Depends(get_db)):
+    profile = await db.get(StudentProfile, student_id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    if body.first_name is not None:
+        profile.first_name = body.first_name
+    if body.last_name is not None:
+        profile.last_name = body.last_name
+    if body.date_of_birth is not None:
+        profile.date_of_birth = body.date_of_birth
+    if body.guardian_name is not None:
+        profile.guardian_name = body.guardian_name
+    if body.guardian_phone is not None:
+        profile.guardian_phone = body.guardian_phone
+    if body.address is not None:
+        profile.address = body.address
+    user = await db.get(User, profile.user_id)
+    if user and body.is_active is not None:
+        user.is_active = body.is_active
+    await db.flush()
+    row = await _fetch_student_row(student_id, db)
+    if not row:
+        raise HTTPException(status_code=500, detail="Failed to fetch updated student")
+    return _row_to_student_response(row)
+
+
+@router.delete("/students/{student_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(get_current_user)])
+async def delete_student(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    role = current_user["role"]
+    if role not in ("super_admin", "principal"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    profile = await db.get(StudentProfile, student_id)
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+
+    user = await db.get(User, profile.user_id)
+    if role == "super_admin" and user:
+        user.deleted_at = datetime.now(timezone.utc)
+        user.is_active = False
+    elif role == "principal" and user:
+        user.is_active = False
+    await db.flush()
 
 
 @router.get("/students/{student_id}/financial", response_model=StudentFinancialResponse)
@@ -939,7 +955,6 @@ async def get_section(
     if not section:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
 
-    # Scope check
     role = current_user["role"]
     uid = current_user["id"]
     if role == "teacher":
@@ -1072,9 +1087,6 @@ async def update_section(
     )
 
 
-# ── Class / Subject Update ────────────────────────────────────────────────
-
-
 @router.patch("/classes/{class_id}", response_model=ClassResponse, dependencies=[admin_only])
 async def update_class(class_id: str, name: str | None = None, order: int | None = None, db: AsyncSession = Depends(get_db)):
     cls = await db.get(Class, class_id)
@@ -1112,7 +1124,6 @@ async def delete_subject(subject_id: str, db: AsyncSession = Depends(get_db)):
     subject = await db.get(Subject, subject_id)
     if not subject:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found")
-    
     try:
         await db.delete(subject)
         await db.flush()
@@ -1125,8 +1136,6 @@ async def delete_subject(subject_id: str, db: AsyncSession = Depends(get_db)):
 
 
 # ── Enrollments ──────────────────────────────────────────────────────────
-
-admin_teacher_student = [Depends(get_current_user)]
 
 @router.post("/enrollments", response_model=EnrollmentResponse, dependencies=[admin_only])
 async def create_enrollment(body: EnrollmentCreate, db: AsyncSession = Depends(get_db)):
@@ -1153,7 +1162,6 @@ async def create_enrollment(body: EnrollmentCreate, db: AsyncSession = Depends(g
     enrollment = Enrollment(**body.model_dump())
     db.add(enrollment)
     await db.flush()
-
     return enrollment
 
 
@@ -1216,7 +1224,6 @@ async def transfer_enrollment(body: TransferCreate, db: AsyncSession = Depends(g
         )
     )
     current_enrollment = current.scalar_one_or_none()
-
     now = datetime.now(timezone.utc)
 
     if current_enrollment:
@@ -1242,10 +1249,8 @@ async def get_my_teaching_profile(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Returns the current teacher's assignments with class, section, and subject names."""
     user_id = current_user["id"]
 
-    # Get all teacher assignments for this user
     result = await db.execute(
         select(TeacherAssignment, Class, Section, Subject)
         .join(Class, TeacherAssignment.class_id == Class.id)
@@ -1278,7 +1283,6 @@ async def get_my_teaching_profile(
         subject_ids.add(str(subj.id))
         section_ids.add(str(sec.id))
 
-    # Also fetch sections where this user is the designated class teacher
     ct_result = await db.execute(
         select(Section, Class)
         .join(Class, Section.class_id == Class.id)

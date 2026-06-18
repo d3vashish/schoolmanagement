@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, adminGetList } from '../api/frappe';
+import { getList, adminGetList, client } from '../api/frappe';
 import { useTimetable } from '../hooks/useTimetable';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -104,25 +104,28 @@ export default function Timetable() {
   const { slots, create, update, remove, saving } = useTimetable(filters);
 
   const { data: courses = [] } = useQuery({
-    queryKey: ['Course', 'list', isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Course', [], ['name', 'course_name'], 100)
-      : getList('Course', [], ['name', 'course_name'], 100),
+    queryKey: ['academic-subjects'],
+    queryFn: async () => {
+      const res = await client.get('/academic/subjects');
+      return res.data;
+    },
     staleTime: 2 * 60 * 1000,
   });
   const { data: groups = [] } = useQuery({
-    queryKey: ['Student Group', 'list', isTeacher, teacherGroupNames.join(','), selectedYear, isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Student Group', groupFilters, ['name', 'student_group_name'], 100)
-      : getList('Student Group', groupFilters, ['name', 'student_group_name'], 100),
+    queryKey: ['academic-sections'],
+    queryFn: async () => {
+      const res = await client.get('/academic/sections');
+      return res.data;
+    },
     staleTime: 2 * 60 * 1000,
   });
   const { data: instructors = [] } = useQuery({
-    queryKey: ['Instructor', 'list', isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100)
-      : getList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100),
-    staleTime: 2 * 60 * 1000,
+    queryKey: ['staff-instructors'],
+    queryFn: async () => {
+      const res = await client.get('/academic/instructors');
+      return res.data;
+    },
+   staleTime: 2 * 60 * 1000,
   });
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm({
@@ -139,10 +142,10 @@ export default function Timetable() {
   const watchedDay = watch('day_of_week');
 
   useEffect(() => {
-    if (!isTeacher && groups.length > 0 && !selectedGroup) {
-      setSelectedGroup(groups[0].name);
-    }
-  }, [groups, isTeacher, selectedGroup]);
+  if (!isTeacher && groups.length > 0 && !selectedGroup) {
+    setSelectedGroup(groups[0].id);
+  }
+}, [groups, isTeacher, selectedGroup]);
 
   const yearGroupNames = groups.map(g => g.name);
   const slotList = slots.data || [];
@@ -260,7 +263,7 @@ export default function Timetable() {
             </div>
           ) : (
             <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)} className="input w-52">
-              {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
+              {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
             </select>
           )}
           {canEdit && (
@@ -503,7 +506,7 @@ export default function Timetable() {
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Subject</label>
                 <select {...register('subject_id')} className="input">
                   <option value="">Select Subject</option>
-                  {courses.map(c => <option key={c.name} value={c.name}>{c.course_name || c.name}</option>)}
+                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {errors.subject_id && <p className="text-xs text-red-500 mt-1">{errors.subject_id.message}</p>}
               </div>
@@ -516,7 +519,7 @@ export default function Timetable() {
                 ) : (
                   <select {...register('section_id')} className="input">
                     <option value="">Select Class</option>
-                    {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
+                    {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                 )}
                 {errors.section_id && <p className="text-xs text-red-500 mt-1">{errors.section_id.message}</p>}
@@ -527,7 +530,7 @@ export default function Timetable() {
                 </label>
                 <select {...register('instructor_id')} className="input">
                   <option value="">Select Teacher</option>
-                  {instructors.map(i => <option key={i.name} value={i.name}>{i.instructor_name || i.name}</option>)}
+                  {instructors.map(i => <option key={i.user_id} value={i.user_id}>{i.first_name} {i.last_name || ''}</option>)}
                 </select>
                 {errors.instructor_id && <p className="text-xs text-red-500 mt-1">{errors.instructor_id.message}</p>}
               </div>

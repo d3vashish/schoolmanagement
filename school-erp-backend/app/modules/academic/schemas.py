@@ -65,7 +65,7 @@ class SectionUpdate(BaseModel):
 
 class SubjectCreate(BaseModel):
     name: str
-    code: str
+    code: str | None = None
     is_graded: bool = True
     department: Optional[str] = None
     description: Optional[str] = None
@@ -78,7 +78,7 @@ class SubjectCreate(BaseModel):
 class SubjectResponse(BaseModel):
     id: UUID
     name: str
-    code: str
+    code: str | None = None
     is_graded: bool
     department: Optional[str] = None
     description: Optional[str] = None
@@ -110,7 +110,7 @@ class ClassSubjectResponse(BaseModel):
     class_id: UUID
     subject_id: UUID
     subject_name: str = ""
-    subject_code: str = ""
+    subject_code: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -244,6 +244,7 @@ class StudentCreate(BaseModel):
     date_of_birth: date | None = None
     class_id: str | None = None
     academic_year_id: str | None = None
+    section_id: str | None = None 
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
@@ -286,6 +287,7 @@ class SectionDetailResponse(BaseModel):
     academic_year_id: UUID
     program: str = ""
     academic_year: str = ""
+    class_teacher_id: UUID | None = None 
     students: list[StudentProfileResponse] = []
 
     model_config = {"from_attributes": True}

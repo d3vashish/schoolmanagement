@@ -44,7 +44,10 @@ async def list_admissions(
     if status_filter:
         q = q.where(Admission.status == status_filter.upper())
     result = await db.execute(q)
-    return result.scalars().all()
+    admissions = result.scalars().all()
+    for a in admissions:
+        await db.refresh(a)
+    return admissions
 
 
 @router.post("/", response_model=AdmissionResponse, status_code=status.HTTP_201_CREATED)
@@ -52,6 +55,7 @@ async def create_admission(body: AdmissionCreate, db: AsyncSession = Depends(get
     admission = Admission(**body.model_dump())
     db.add(admission)
     await db.flush()
+    await db.refresh(admission)
     return admission
 
 
@@ -60,8 +64,8 @@ async def get_admission(admission_id: str, db: AsyncSession = Depends(get_db)):
     admission = await db.get(Admission, admission_id)
     if not admission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    await db.refresh(admission)
     return admission
-
 
 @router.patch("/{admission_id}/status", response_model=AdmissionResponse, dependencies=teacher_admin)
 async def update_status(
@@ -73,7 +77,9 @@ async def update_status(
     admission = await db.get(Admission, admission_id)
     if not admission:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return await transition_status(admission, body.status.upper(), current_user["id"], db)
+    updated = await transition_status(admission, body.status.upper(), current_user["id"], db)
+    await db.refresh(updated)
+    return updated
 
 
 @router.get("/transitions/{current_status}")

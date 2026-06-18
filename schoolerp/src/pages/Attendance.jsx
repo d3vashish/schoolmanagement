@@ -281,24 +281,21 @@ export default function Attendance() {
       // Parallel batch: all creates in parallel, all updates in parallel
       const [createResults, updateResults] = await Promise.all([
         Promise.allSettled(toCreate.map(async (payload) => {
-          try {
-            return await createDoc('Student Attendance', payload);
-          } catch (err) {
-            if (err?.response?.status === 403) {
-              return await adminCreateDoc('Student Attendance', payload);
-            }
-            throw err;
-          }
+          const res = await client.post('/attendance/mark', {
+            student_id: payload.student,
+            section_id: payload.student_group,
+            date: payload.date,
+            status: payload.status,
+          });
+          return res.data;
         })),
-        Promise.allSettled(toUpdate.map(async ({ name, status }) => {
-          try {
-            return await updateDoc('Student Attendance', name, { status });
-          } catch (err) {
-            if (err?.response?.status === 403) {
-              return await adminUpdateDoc('Student Attendance', name, { status });
-            }
-            throw err;
-          }
+        Promise.allSettled(toUpdate.map(async ({ name, status, student }) => {
+          const res = await client.patch(`/attendance/mark/${name}`, {
+            student_id: student,
+            date: date,
+            status: status,
+          });
+          return res.data;
         })),
       ]);
 
@@ -306,7 +303,7 @@ export default function Attendance() {
       const newDocs = { ...existingDocs };
       createResults.forEach((result, i) => {
         if (result.status === 'fulfilled' && result.value) {
-          newDocs[toCreate[i].student] = result.value.name;
+          newDocs[toCreate[i].student] = result.value.id || result.value.name;
         } else {
           errors++;
           console.error('Failed to create:', toCreate[i].student, result.reason);
@@ -489,7 +486,7 @@ export default function Attendance() {
                 <label className="block text-xs font-semibold text-gray-500 mb-1 uppercase tracking-wide">Section</label>
                 <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)}
                   className="input text-sm min-w-[160px]">
-                  {studentGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+                  {studentGroups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
                 </select>
               </div>
             )}

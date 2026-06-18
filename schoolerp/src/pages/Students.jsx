@@ -236,26 +236,41 @@ export default function Students() {
 
   const createStudentMutation = useMutation({
     mutationFn: async (data) => {
-      const newStudent = await createDoc('Student', data);
-      const groupDoc = await getDoc('Student Group', selectedSection.name);
-      const existingStudents = groupDoc?.students || [];
-      await updateDoc('Student Group', selectedSection.name, {
-        students: [...existingStudents, {
-          student: newStudent.name,
-          student_name: `${data.first_name} ${data.last_name || ''}`.trim(),
-          active: 1,
-        }]
+      const res = await client.post('/academic/students', {
+        first_name: data.first_name,
+        last_name: data.last_name || '',
+        email: data.student_email || data.student_email_id || '',
+        password: 'password123',
+        date_of_birth: data.date_of_birth || null,
+        guardian_name: data.guardian_name || null,
+        guardian_phone: data.guardian_mobile || null,
+        address: data.address_line1 || null,
+        class_id: selectedSection?.class_id || null,
+        section_id: selectedSection?.id || null,
+        academic_year_id: selectedYear || null,
       });
-      return newStudent;
+      
+      return res.data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setShowModal(false);
     },
+    onError: (error) => {                                    // ← add this
+      const detail = error.response?.data?.detail;
+      alert(detail || 'Failed to create student');
+    },
   });
 
   const updateStudentMutation = useMutation({
-    mutationFn: ({ name, data }) => updateDoc('Student', name, data),
+    mutationFn: ({ name, data }) => client.patch(`/academic/students/${name}`, {
+      first_name: data.first_name,
+      last_name: data.last_name,
+      date_of_birth: data.date_of_birth || null,
+      guardian_name: data.guardian_name || null,
+      guardian_phone: data.guardian_mobile || null,
+      address: data.address_line1 || null,
+    }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setShowModal(false); setEditingStudent(null);
@@ -263,7 +278,7 @@ export default function Students() {
   });
 
   const deleteStudentMutation = useMutation({
-    mutationFn: (name) => deleteDoc('Student', name),
+    mutationFn: (name) => client.delete(`/academic/students/${name}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setDeleteConfirm(null);
