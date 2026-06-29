@@ -25,31 +25,18 @@ class FeeStructureCreate(BaseModel):
     class_id: UUID
     fee_head_id: UUID
     amount: Decimal
+    is_new_student: bool = False
 
 
 class FeeStructureResponse(BaseModel):
     id: UUID
     academic_year_id: UUID
     class_id: UUID
+    class_name: str | None = None
     fee_head_id: UUID
+    fee_head_name: str | None = None
     amount: Decimal
-
-    model_config = {"from_attributes": True}
-
-
-class FeeInstallmentCreate(BaseModel):
-    structure_id: UUID
-    name: str
-    due_date: date
-    percent: int
-
-
-class FeeInstallmentResponse(BaseModel):
-    id: UUID
-    structure_id: UUID
-    name: str
-    due_date: date
-    percent: int
+    is_new_student: bool
 
     model_config = {"from_attributes": True}
 
@@ -75,59 +62,6 @@ class StudentDiscountResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class InvoiceCreate(BaseModel):
-    student_id: str
-    installment_id: str
-    gross_amount: Decimal
-    discount_amount: Decimal = Decimal("0")
-    net_amount: Decimal
-    due_date: date
-    section_id: str | None = None
-    academic_year_id: str | None = None
-
-
-class InvoiceResponse(BaseModel):
-    id: UUID
-    student_id: UUID
-    section_id: UUID | None = None
-    academic_year_id: UUID | None = None
-    installment_id: UUID
-    gross_amount: Decimal
-    discount_amount: Decimal
-    net_amount: Decimal
-    due_date: date
-    status: str
-    paid_at: datetime | None
-    late_fee_per_day: Decimal
-    razorpay_order_id: str | None
-    receipt_url: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class CreateOrderResponse(BaseModel):
-    razorpay_order_id: str
-    amount: Decimal
-    currency: str = "INR"
-
-
-class PaymentOrderResponse(BaseModel):
-    id: UUID
-    invoice_id: UUID
-    razorpay_order_id: str
-    amount: Decimal
-    status: str
-    created_at: datetime | None = None
-
-    model_config = {"from_attributes": True}
-
-
-class RazorpayWebhookPayload(BaseModel):
-    razorpay_payment_id: str
-    razorpay_order_id: str
-    status: str
-
-
 class StudentLedgerEntryResponse(BaseModel):
     id: UUID
     student_id: UUID
@@ -143,25 +77,37 @@ class StudentLedgerEntryResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class PaymentCreate(BaseModel):
-    invoice_id: UUID
+class FeeReceiptCreate(BaseModel):
+    student_id: UUID
+    academic_year_id: UUID
     amount: Decimal
     mode: str
     reference_no: str | None = None
     notes: str | None = None
 
 
-class PaymentResponse(BaseModel):
+class FeeReceiptResponse(BaseModel):
     id: UUID
-    invoice_id: UUID
+    receipt_number: str
+    student_id: UUID
+    academic_year_id: UUID
     amount: Decimal
     mode: str
     reference_no: str | None
-    received_by: UUID
     notes: str | None
+    received_by: UUID
     created_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+
+class StudentFeeSummaryResponse(BaseModel):
+    student_id: UUID
+    academic_year_id: UUID
+    owed: Decimal
+    paid: Decimal
+    remaining: Decimal
+    status: str
 
 
 class JournalEntryCreate(BaseModel):
@@ -211,3 +157,18 @@ class CollectionReportResponse(BaseModel):
     total_collected: Decimal
     payment_count: int
     mode_breakdown: dict | None = None
+
+
+class SectionSummaryResponse(BaseModel):
+    section_id: str
+    section_name: str
+    student_count: int
+    total_billed: Decimal
+    total_collected: Decimal
+    total_outstanding: Decimal
+
+
+class ClassSummaryResponse(BaseModel):
+    class_id: str
+    class_name: str
+    sections: list[SectionSummaryResponse]

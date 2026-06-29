@@ -1,7 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { getAllowedPages, getPrimaryRole } from '../config/roleAccess';
+import { getAllowedPages } from '../config/roleAccess';
 import { useState } from 'react';
 
 const icons = {
@@ -44,12 +44,10 @@ const navGroups = [
     { path: '/attendance', label: 'Attendance',        icon: 'attendance' },
     { path: '/timetable',  label: 'Timetable',         icon: 'timetable'  },
     { path: '/homework',   label: 'Homework',          icon: 'homework'   },
-    { path: '/behaviour',  label: 'Behaviour',         icon: 'behaviour'  },
     { path: '/library',       label: 'Library',           icon: 'library'    },
     { path: '/admissions',    label: 'Admissions',        icon: 'students'   },
   ]},
   { label: 'Examinations', iconColor: '#F97316', items: [
-    { path: '/exams',        label: 'Exams',        icon: 'exams'        },
     { path: '/class-tests',  label: 'Class Tests',  icon: 'classtests'   },
     { path: '/certificates', label: 'Certificates', icon: 'certificates' },
     { path: '/reports',         label: 'Reports',       icon: 'reports'      },
@@ -60,12 +58,6 @@ const navGroups = [
     { path: '/salary',    label: 'Salary',    icon: 'salary'    },
     { path: '/accounts',  label: 'Accounts',  icon: 'accounts'  },
     { path: '/fees',      label: 'Fees',      icon: 'fees'      },
-  ]},
-  { label: 'Communication', iconColor: '#FD8A5E', items: [
-    { path: '/live-class', label: 'Live Class',    icon: 'liveclass' },
-    { path: '/messaging',  label: 'Messaging',     icon: 'messaging' },
-    { path: '/notifications', label: 'Notifications', icon: 'sms'       },
-    { path: '/store',      label: 'Store & POS',   icon: 'store'     },
   ]},
   { label: 'Admin', iconColor: '#FBBF24', items: [
     { path: '/admin',    label: 'Dashboard',  icon: 'dashboard' },
@@ -134,7 +126,7 @@ function GroupSection({ group, defaultOpen = true, styleDelay }) {
 }
 
 export default function Sidebar() {
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
   const { school_name } = useSettings();
 
   const roles = user?.roles || [];
@@ -147,8 +139,6 @@ export default function Sidebar() {
       items: group.items.filter(item => isFullAccess || allowedPages.includes(item.path)),
     }))
     .filter(group => group.items.length > 0);
-
-  const roleLabel = getPrimaryRole(roles);
 
   return (
     <aside className="fixed left-0 top-0 h-screen flex flex-col z-10 overflow-hidden"
@@ -175,26 +165,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="flex-shrink-0 border-t border-[#E8ECF1] animate-in" style={{ animationDelay: '280ms' }}>
-        {user && (
-          <div className="mx-2 my-2 px-3 py-[9px] rounded-[999px] bg-[#E8F9ED] transition-[background-color] duration-200 hover:bg-[#D1FAE5]">
-            <p className="text-[10px] text-[#94A3B8] mb-[1px] tracking-wide">Signed in as</p>
-            <p className="text-xs font-semibold text-[#1F2A44] truncate">{user.full_name || user.usr}</p>
-            <p className="text-[10px] mt-[2px] font-medium text-[#475569]">{roleLabel}</p>
-          </div>
-        )}
-        <div className="px-2 pb-3">
-          <button onClick={logout}
-            className="flex items-center gap-3 px-3 py-[9px] rounded-[999px] w-full text-sm font-medium text-[#475569] hover:bg-[#E8F9ED] hover:text-[#2ED05D] transition-[color,background-color,transform] duration-200 cursor-pointer active:scale-[0.96] group">
-            <span className="w-5 h-5 flex items-center justify-center transition-[color,transform] duration-300 group-hover:-translate-y-[1px]">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </span>
-            <span>Sign out</span>
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }

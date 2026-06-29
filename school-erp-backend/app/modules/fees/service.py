@@ -5,14 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.academic.models import AcademicYear
-from app.modules.fees.models import (
-    FeeInstallment,
-    FeeStructure,
-    Invoice,
-    LateFeeRule,
-    StudentDiscount,
-)
-from app.modules.fees.utils import calculate_late_fee
+from app.modules.fees.models import FeeHead, FeeReceipt, FeeStructure, StudentDiscount
 
 
 async def get_current_academic_year(db: AsyncSession) -> AcademicYear | None:
@@ -30,6 +23,60 @@ async def get_fee_structure(class_id: str, academic_year_id: str, db: AsyncSessi
     return result.scalars().all()
 
 
+async def get_structures_detailed(
+    db: AsyncSession,
+    academic_year_id: str | None = None,
+    class_id: str | None = None,
+) -> list[dict]:
+    """
+    Returns fee structures joined with class name and fee head name (both stored
+    as foreign keys on FeeStructure, not human-readable on their own). Used by
+    the Structures dashboard tab, which otherwise has nothing readable to show
+    besides raw UUIDs and amounts.
+    """
+    from app.modules.academic.models import Class
+
+    q = (
+        select(
+            FeeStructure.id,
+            FeeStructure.academic_year_id,
+            FeeStructure.class_id,
+            Class.name.label("class_name"),
+            Class.order.label("class_order"),
+            FeeStructure.fee_head_id,
+            FeeHead.name.label("fee_head_name"),
+            FeeStructure.amount,
+            FeeStructure.is_new_student,
+        )
+        .select_from(FeeStructure)
+        .join(Class, Class.id == FeeStructure.class_id)
+        .join(FeeHead, FeeHead.id == FeeStructure.fee_head_id)
+        .order_by(Class.order, FeeStructure.is_new_student)
+    )
+
+    if academic_year_id:
+        q = q.where(FeeStructure.academic_year_id == academic_year_id)
+    if class_id:
+        q = q.where(FeeStructure.class_id == class_id)
+
+    result = await db.execute(q)
+    rows = result.all()
+
+    return [
+        {
+            "id": row.id,
+            "academic_year_id": row.academic_year_id,
+            "class_id": row.class_id,
+            "class_name": row.class_name,
+            "fee_head_id": row.fee_head_id,
+            "fee_head_name": row.fee_head_name,
+            "amount": row.amount,
+            "is_new_student": row.is_new_student,
+        }
+        for row in rows
+    ]
+
+
 async def get_student_discounts(student_id: str, db: AsyncSession) -> list[StudentDiscount]:
     result = await db.execute(
         select(StudentDiscount).where(StudentDiscount.student_id == student_id)
@@ -37,78 +84,255 @@ async def get_student_discounts(student_id: str, db: AsyncSession) -> list[Stude
     return result.scalars().all()
 
 
-def calculate_gross(installment: FeeStructure, amount: Decimal) -> Decimal:
-    return amount * Decimal(installment.percent) / Decimal(100)
+async def is_new_student_for_year(student_id: str, academic_year_id: str, db: AsyncSession) -> bool:
+    """
+    A student counts as "new" for a given academic year if their EARLIEST
+    enrollment record (across all years) falls in that same academic year.
+    If they have any enrollment from an earlier year, they're continuing
+    ("old"), even if they've since moved up a class or section.
+    """
+    from app.modules.academic.models import Enrollment
 
-
-def apply_discounts(gross: Decimal, discounts: list[StudentDiscount]) -> Decimal:
-    total = Decimal("0")
-    for d in discounts:
-        if d.percentage:
-            total += gross * d.percentage / Decimal(100)
-        elif d.flat_amount:
-            total += d.flat_amount
-    return min(total, gross)
-
-
-async def generate_invoices(student_id: str, db: AsyncSession) -> list[Invoice]:
-    from app.modules.auth.models import StudentProfile
-
-    student_result = await db.execute(
-        select(StudentProfile).where(StudentProfile.id == student_id)
+    earliest = await db.execute(
+        select(Enrollment.academic_year_id)
+        .where(Enrollment.student_id == student_id)
+        .order_by(Enrollment.enrolled_at.asc())
+        .limit(1)
     )
-    student = student_result.scalar_one_or_none()
-    if not student:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
+    earliest_year_id = earliest.scalar_one_or_none()
 
-    year = await get_current_academic_year(db)
-    if not year:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No active academic year")
+    # No enrollment history at all (shouldn't normally happen) - treat as new.
+    if earliest_year_id is None:
+        return True
 
-    structures = await get_fee_structure(str(student.class_id), str(year.id), db)
-    if not structures:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No fee structure for this class")
+    return str(earliest_year_id) == str(academic_year_id)
 
-    discounts = await get_student_discounts(student_id, db)
-    invoices = []
 
-    for structure in structures:
-        installment_result = await db.execute(
-            select(FeeInstallment).where(FeeInstallment.structure_id == structure.id)
-            .order_by(FeeInstallment.due_date)
+async def get_student_owed_amount(student_id: str, academic_year_id: str, db: AsyncSession) -> Decimal:
+    """
+    Computes what a student owes for an academic year: the sum of every
+    FeeStructure row for their class + year, combined across all fee heads
+    (no per-head breakdown - matches the "combined total only" model).
+    Picks only the old/new student structure rows matching their status,
+    same as the old invoice-generation logic did, so they aren't billed
+    for both the new-student and continuing-student rows for their class.
+    """
+    from app.modules.academic.models import Enrollment
+
+    enrollment_result = await db.execute(
+        select(Enrollment).where(
+            Enrollment.student_id == student_id,
+            Enrollment.status == "ACTIVE",
         )
-        installments = installment_result.scalars().all()
+    )
+    enrollment = enrollment_result.scalar_one_or_none()
+    if not enrollment:
+        return Decimal("0")
 
-        for installment in installments:
-            gross = structure.amount * Decimal(installment.percent) / Decimal(100)
-            discount = apply_discounts(gross, discounts)
-            net = gross - discount
+    is_new = await is_new_student_for_year(student_id, academic_year_id, db)
+    all_structures = await get_fee_structure(str(enrollment.class_id), academic_year_id, db)
+    structures = [s for s in all_structures if s.is_new_student == is_new]
 
-            late_fee_result = await db.execute(
-                select(LateFeeRule).where(LateFeeRule.structure_id == structure.id)
-            )
-            late_fee_rule = late_fee_result.scalar_one_or_none()
+    return sum((s.amount for s in structures), Decimal("0"))
 
-            invoice = Invoice(
-                student_id=student_id,
-                installment_id=installment.id,
-                gross_amount=gross,
-                discount_amount=discount,
-                net_amount=net,
-                due_date=installment.due_date,
-                status="PENDING",
-                late_fee_per_day=late_fee_rule.amount_per_day if late_fee_rule else Decimal("0"),
-                late_fee_max=late_fee_rule.max_amount if late_fee_rule else None,
-            )
-            db.add(invoice)
-            invoices.append(invoice)
+
+async def get_student_paid_amount(student_id: str, academic_year_id: str, db: AsyncSession) -> Decimal:
+    result = await db.execute(
+        select(func.coalesce(func.sum(FeeReceipt.amount), 0))
+        .where(
+            FeeReceipt.student_id == student_id,
+            FeeReceipt.academic_year_id == academic_year_id,
+        )
+    )
+    return Decimal(result.scalar() or 0)
+
+
+async def get_student_fee_summary(student_id: str, academic_year_id: str, db: AsyncSession) -> dict:
+    owed = await get_student_owed_amount(student_id, academic_year_id, db)
+    paid = await get_student_paid_amount(student_id, academic_year_id, db)
+    remaining = owed - paid
+    if remaining <= 0 and owed > 0:
+        pay_status = "PAID"
+    elif paid > 0:
+        pay_status = "PARTIAL"
+    else:
+        pay_status = "UNPAID"
+    return {
+        "student_id": student_id,
+        "academic_year_id": academic_year_id,
+        "owed": owed,
+        "paid": paid,
+        "remaining": remaining,
+        "status": pay_status,
+    }
+
+
+async def generate_receipt_number(db: AsyncSession) -> str:
+    """
+    Sequential, human-readable receipt numbers like RCPT-2026-000123.
+    Counts existing receipts for the current calendar year and increments.
+    Not safe against a race between two simultaneous payments (would need
+    a DB sequence or SELECT ... FOR UPDATE for that), but fine for a single
+    accountant entering payments one at a time.
+    """
+    from datetime import date as date_cls
+
+    year = date_cls.today().year
+    count_result = await db.execute(
+        select(func.count(FeeReceipt.id)).where(
+            FeeReceipt.receipt_number.like(f"RCPT-{year}-%")
+        )
+    )
+    count = count_result.scalar() or 0
+    return f"RCPT-{year}-{count + 1:06d}"
+
+
+async def record_fee_payment(
+    db: AsyncSession,
+    student_id: str,
+    academic_year_id: str,
+    amount: Decimal,
+    mode: str,
+    reference_no: str | None,
+    received_by: str,
+    notes: str | None,
+) -> FeeReceipt:
+    if amount <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Amount must be greater than zero")
+
+    receipt_number = await generate_receipt_number(db)
+    receipt = FeeReceipt(
+        receipt_number=receipt_number,
+        student_id=student_id,
+        academic_year_id=academic_year_id,
+        amount=amount,
+        mode=mode,
+        reference_no=reference_no,
+        notes=notes,
+        received_by=received_by,
+    )
+    db.add(receipt)
+    await db.flush()  # so receipt.id exists for ref_id below
+
+    # Keep the student ledger in sync with FeeReceipt. Without this, payments
+    # show up in get_student_fee_summary/get_class_summary (Dashboard) but
+    # never in get_ledger_summary (Student tab), since nothing else writes
+    # PAYMENT rows to StudentLedgerEntry. Same pattern approve_journal_entry()
+    # already uses for ADJUSTMENT_DEBIT / ADJUSTMENT_CREDIT entries.
+    await post_to_ledger(
+        db,
+        student_id=student_id,
+        entry_type="PAYMENT",
+        amount=amount,
+        ref_type="FeeReceipt",
+        ref_id=str(receipt.id),
+        description=f"Payment received via {mode}" + (f" (Ref: {reference_no})" if reference_no else ""),
+        created_by=received_by,
+    )
 
     await db.flush()
-    return invoices
+    return receipt
 
 
-def get_invoice_total_with_late_fee(invoice: Invoice) -> Decimal:
-    return invoice.net_amount + calculate_late_fee(invoice)
+async def get_student_receipts(
+    db: AsyncSession,
+    student_id: str,
+    academic_year_id: str | None = None,
+) -> list[FeeReceipt]:
+    q = select(FeeReceipt).where(FeeReceipt.student_id == student_id).order_by(FeeReceipt.created_at.desc())
+    if academic_year_id:
+        q = q.where(FeeReceipt.academic_year_id == academic_year_id)
+    result = await db.execute(q)
+    return result.scalars().all()
+
+
+async def get_defaulters(
+    db: AsyncSession,
+    academic_year_id: str | None = None,
+    section_id: str | None = None,
+) -> list[dict]:
+    """
+    A defaulter is any student who still owes money (remaining > 0) for the
+    academic year, at any point during the year - no due-date/overdue concept
+    anymore since fees can be paid any time during the year.
+    """
+    from app.modules.academic.models import AcademicYear as AY, Enrollment, Section
+    from app.modules.auth.models import StudentProfile, User
+
+    if not academic_year_id:
+        ay = await db.execute(select(AY.id).where(AY.is_active.is_(True)))
+        academic_year_id = ay.scalar_one_or_none()
+        if not academic_year_id:
+            return []
+
+    enrollment_q = (
+        select(
+            StudentProfile.id,
+            User.full_name,
+            Section.name.label("section_name"),
+        )
+        .select_from(StudentProfile)
+        .join(User, User.id == StudentProfile.user_id)
+        .join(Enrollment, (Enrollment.student_id == StudentProfile.id) & (Enrollment.status == "ACTIVE"))
+        .join(Section, Section.id == Enrollment.section_id)
+        .where(User.deleted_at.is_(None), User.is_active.is_(True))
+        .where(Enrollment.academic_year_id == academic_year_id)
+    )
+    if section_id:
+        enrollment_q = enrollment_q.where(Enrollment.section_id == section_id)
+
+    result = await db.execute(enrollment_q)
+    rows = result.all()
+
+    defaulters = []
+    for row in rows:
+        summary = await get_student_fee_summary(str(row.id), str(academic_year_id), db)
+        if summary["remaining"] > 0:
+            defaulters.append({
+                "student_id": str(row.id),
+                "student_name": row.full_name,
+                "section": row.section_name,
+                "total_due": summary["owed"],
+                "total_paid": summary["paid"],
+                "balance": summary["remaining"],
+                "overdue_count": 0,
+            })
+
+    defaulters.sort(key=lambda d: d["balance"], reverse=True)
+    return defaulters
+
+
+async def get_collection_report(
+    db: AsyncSession,
+    from_date: str | None = None,
+    to_date: str | None = None,
+) -> list[dict]:
+    q = select(
+        func.date(FeeReceipt.created_at).label("payment_date"),
+        func.coalesce(func.sum(FeeReceipt.amount), 0).label("total_collected"),
+        func.count(FeeReceipt.id).label("payment_count"),
+    )
+
+    if from_date:
+        q = q.where(func.date(FeeReceipt.created_at) >= from_date)
+    if to_date:
+        q = q.where(func.date(FeeReceipt.created_at) <= to_date)
+
+    q = q.group_by(func.date(FeeReceipt.created_at))
+    q = q.order_by(func.date(FeeReceipt.created_at).desc())
+
+    result = await db.execute(q)
+    rows = result.all()
+
+    return [
+        {
+            "date": row.payment_date,
+            "total_collected": row.total_collected,
+            "payment_count": row.payment_count,
+            "mode_breakdown": None,
+        }
+        for row in rows
+    ]
 
 
 async def post_to_ledger(
@@ -152,54 +376,6 @@ async def post_to_ledger(
     return entry
 
 
-async def record_payment(
-    db: AsyncSession,
-    invoice_id: str,
-    amount: Decimal,
-    mode: str,
-    reference_no: str | None,
-    received_by: str,
-    notes: str | None,
-) -> dict:
-    from app.modules.fees.models import Invoice, Payment
-
-    invoice = await db.get(Invoice, invoice_id)
-    if not invoice:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
-    if invoice.status == "PAID":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invoice already paid")
-
-    payment = Payment(
-        invoice_id=invoice_id,
-        amount=amount,
-        mode=mode,
-        reference_no=reference_no,
-        received_by=received_by,
-        notes=notes,
-    )
-    db.add(payment)
-
-    invoice.paid_amount = (invoice.paid_amount or Decimal("0")) + amount
-    if invoice.paid_amount >= invoice.net_amount:
-        invoice.status = "PAID"
-        from datetime import datetime, timezone
-        invoice.paid_at = datetime.now(timezone.utc)
-
-    await post_to_ledger(
-        db,
-        student_id=str(invoice.student_id),
-        entry_type="PAYMENT",
-        amount=amount,
-        ref_type="Payment",
-        ref_id=None,
-        description=f"Payment for invoice {str(invoice_id)[:8]} - {mode}",
-        created_by=received_by,
-    )
-
-    await db.flush()
-    return {"payment_id": str(payment.id), "invoice_status": invoice.status}
-
-
 async def get_student_ledger(
     db: AsyncSession,
     student_id: str,
@@ -219,13 +395,7 @@ async def get_student_ledger(
 
 
 async def get_ledger_summary(db: AsyncSession, student_id: str) -> dict:
-    from app.modules.fees.models import Invoice, StudentLedgerEntry
-
-    due_result = await db.execute(
-        select(func.coalesce(func.sum(Invoice.net_amount), 0))
-        .where(Invoice.student_id == student_id, Invoice.status != "PAID")
-    )
-    total_due = due_result.scalar() or Decimal("0")
+    from app.modules.fees.models import StudentLedgerEntry
 
     paid_result = await db.execute(
         select(func.coalesce(func.sum(StudentLedgerEntry.amount), 0))
@@ -242,6 +412,11 @@ async def get_ledger_summary(db: AsyncSession, student_id: str) -> dict:
     )
     last_entry = last_result.scalar()
 
+    year = await get_current_academic_year(db)
+    total_due = Decimal("0")
+    if year:
+        total_due = await get_student_owed_amount(student_id, str(year.id), db)
+
     return {
         "student_id": student_id,
         "total_due": total_due,
@@ -249,109 +424,6 @@ async def get_ledger_summary(db: AsyncSession, student_id: str) -> dict:
         "balance": total_due - total_paid,
         "last_entry_date": last_entry,
     }
-
-
-async def get_defaulters(
-    db: AsyncSession,
-    academic_year_id: str | None = None,
-    section_id: str | None = None,
-) -> list[dict]:
-    from app.modules.academic.models import AcademicYear, Enrollment, Section
-    from app.modules.auth.models import StudentProfile, User
-
-    from sqlalchemy import and_, or_
-
-    q = select(
-        StudentProfile.id,
-        User.full_name,
-        Section.name.label("section_name"),
-        func.coalesce(func.sum(Invoice.net_amount), 0).label("total_due"),
-        func.coalesce(func.sum(Invoice.paid_amount), 0).label("total_paid"),
-        func.count(Invoice.id).label("overdue_count"),
-    ).select_from(StudentProfile)
-
-    q = q.join(User, User.id == StudentProfile.user_id)
-    q = q.join(Enrollment, and_(
-        Enrollment.student_id == StudentProfile.id,
-        Enrollment.status == "ACTIVE",
-    ))
-    q = q.join(Section, Section.id == Enrollment.section_id)
-    q = q.join(Invoice, and_(
-        Invoice.student_id == StudentProfile.id,
-        Invoice.status != "PAID",
-        Invoice.due_date < func.current_date(),
-    ))
-
-    if academic_year_id:
-        q = q.where(Invoice.academic_year_id == academic_year_id)
-    else:
-        ay = await db.execute(
-            select(AcademicYear.id).where(AcademicYear.is_active.is_(True))
-        )
-        ay_id = ay.scalar_one_or_none()
-        if ay_id:
-            q = q.where(Invoice.academic_year_id == ay_id)
-
-    if section_id:
-        q = q.where(Enrollment.section_id == section_id)
-
-    q = q.group_by(StudentProfile.id, User.full_name, Section.name)
-    q = q.order_by((func.coalesce(func.sum(Invoice.net_amount), 0) - func.coalesce(func.sum(Invoice.paid_amount), 0)).desc())
-
-    result = await db.execute(q)
-    rows = result.all()
-
-    return [
-        {
-            "student_id": str(row.id),
-            "student_name": row.full_name,
-            "section": row.section_name,
-            "total_due": row.total_due,
-            "total_paid": row.total_paid,
-            "balance": row.total_due - row.total_paid,
-            "overdue_count": row.overdue_count,
-        }
-        for row in rows
-    ]
-
-
-async def get_collection_report(
-    db: AsyncSession,
-    from_date: str | None = None,
-    to_date: str | None = None,
-) -> list[dict]:
-    from app.modules.fees.models import Payment
-
-    from datetime import date
-
-    today = date.today()
-
-    q = select(
-        func.date(Payment.created_at).label("payment_date"),
-        func.coalesce(func.sum(Payment.amount), 0).label("total_collected"),
-        func.count(Payment.id).label("payment_count"),
-    )
-
-    if from_date:
-        q = q.where(func.date(Payment.created_at) >= from_date)
-    if to_date:
-        q = q.where(func.date(Payment.created_at) <= to_date)
-
-    q = q.group_by(func.date(Payment.created_at))
-    q = q.order_by(func.date(Payment.created_at).desc())
-
-    result = await db.execute(q)
-    rows = result.all()
-
-    return [
-        {
-            "date": row.payment_date,
-            "total_collected": row.total_collected,
-            "payment_count": row.payment_count,
-            "mode_breakdown": None,
-        }
-        for row in rows
-    ]
 
 
 async def create_journal_entry(
@@ -419,3 +491,67 @@ async def approve_journal_entry(
 
     await db.flush()
     return entry
+
+
+async def get_class_summary(
+    db: AsyncSession,
+    academic_year_id: str | None = None,
+) -> list[dict]:
+    """
+    Returns, for every class, its sections nested inside, with student
+    count and fee totals per section for the given academic year.
+    Owed/paid totals are computed per student via get_student_fee_summary
+    rather than joined from an Invoice table, since that no longer exists.
+    Excludes soft-deleted / inactive users from counts and totals.
+    """
+    from app.modules.academic.models import AcademicYear as AY, Class, Enrollment, Section
+    from app.modules.auth.models import StudentProfile, User
+
+    if not academic_year_id:
+        ay = await db.execute(select(AY.id).where(AY.is_active.is_(True)))
+        academic_year_id = ay.scalar_one_or_none()
+
+    sections_result = await db.execute(
+        select(Class.id, Class.name, Class.order, Section.id.label("section_id"), Section.name.label("section_name"))
+        .select_from(Class)
+        .join(Section, Section.class_id == Class.id)
+        .order_by(Class.order, Section.name)
+    )
+    section_rows = sections_result.all()
+
+    classes: dict[str, dict] = {}
+    for row in section_rows:
+        cid = str(row.id)
+        if cid not in classes:
+            classes[cid] = {"class_id": cid, "class_name": row.name, "sections": []}
+
+        students_result = await db.execute(
+            select(StudentProfile.id)
+            .join(User, User.id == StudentProfile.user_id)
+            .join(Enrollment, (Enrollment.student_id == StudentProfile.id) & (Enrollment.status == "ACTIVE"))
+            .where(
+                Enrollment.section_id == row.section_id,
+                User.deleted_at.is_(None),
+                User.is_active.is_(True),
+            )
+        )
+        student_ids = [str(r[0]) for r in students_result.all()]
+
+        total_billed = Decimal("0")
+        total_collected = Decimal("0")
+        if academic_year_id:
+            for sid in student_ids:
+                summary = await get_student_fee_summary(sid, str(academic_year_id), db)
+                total_billed += summary["owed"]
+                total_collected += summary["paid"]
+
+        classes[cid]["sections"].append({
+            "section_id": str(row.section_id),
+            "section_name": row.section_name,
+            "student_count": len(student_ids),
+            "total_billed": total_billed,
+            "total_collected": total_collected,
+            "total_outstanding": total_billed - total_collected,
+        })
+
+    return list(classes.values())

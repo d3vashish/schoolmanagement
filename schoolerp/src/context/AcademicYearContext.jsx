@@ -24,7 +24,7 @@ export function AcademicYearProvider({ children }) {
   // Auto-select active year on load
   useEffect(() => {
     if (academicYears.length > 0 && !selectedYear) {
-      const active = academicYears.find(y => y.is_active) || academicYears[0];
+      const active = academicYears.find(y => y.is_current) || academicYears[0];
       if (active) setSelectedYearInternal(active.id);
     }
   }, [academicYears, selectedYear]);
@@ -38,7 +38,7 @@ export function AcademicYearProvider({ children }) {
     [academicYears, selectedYear]
   );
 
-  const currentYear = academicYears.find(y => y.is_active)?.id || '';
+  const currentYear = academicYears.find(y => y.is_current)?.id || '';
   const isCurrentYear = selectedYear === currentYear;
 
   const value = {

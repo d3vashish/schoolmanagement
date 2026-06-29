@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from app.modules.academic.models import (
     TeacherAssignment,
 )
 from app.modules.academic.service import PromotionError, promote_students
+from app.modules.academic.utils import generate_admission_number
 from app.modules.academic.schemas import (
     AcademicYearCreate,
     AcademicYearResponse,
@@ -132,7 +134,16 @@ def _row_to_student_response(row) -> StudentProfileResponse:
 @router.get("/years", response_model=list[AcademicYearResponse])
 async def list_years(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(AcademicYear).order_by(AcademicYear.start_date.desc()))
-    return result.scalars().all()
+    years = result.scalars().all()
+    today = date.today()
+    return [
+        AcademicYearResponse(
+            id=y.id, name=y.name, start_date=y.start_date, end_date=y.end_date,
+            is_active=y.is_active,
+            is_current=(y.start_date <= today <= y.end_date),
+        )
+        for y in years
+    ]
 
 
 @router.post("/years", response_model=AcademicYearResponse, dependencies=[admin_only])
@@ -260,7 +271,12 @@ async def get_year(year_id: str, db: AsyncSession = Depends(get_db)):
     year = await db.get(AcademicYear, year_id)
     if not year:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Academic year not found")
-    return year
+    today = date.today()
+    return AcademicYearResponse(
+        id=year.id, name=year.name, start_date=year.start_date, end_date=year.end_date,
+        is_active=year.is_active,
+        is_current=(year.start_date <= today <= year.end_date),
+    )
 
 
 @router.get("/classes/{class_id}", response_model=ClassResponse)
@@ -485,7 +501,8 @@ async def list_students(
         enrollment_alias.c.status == "ACTIVE",
     )
     ).outerjoin(academic_class_alias, enrollment_alias.c.class_id == academic_class_alias.c.id
-    ).outerjoin(section_alias, enrollment_alias.c.section_id == section_alias.c.id)
+    ).outerjoin(section_alias, enrollment_alias.c.section_id == section_alias.c.id
+    ).where(User.deleted_at.is_(None), User.is_active.is_(True))
 
     if section_id:
         try:
@@ -706,7 +723,8 @@ async def create_student(body: StudentCreate, db: AsyncSession = Depends(get_db)
         first_name=body.first_name,
         last_name=body.last_name,
         date_of_birth=body.date_of_birth,
-        admission_number=f"STU-{user.id}"[:50],
+        admission_number=generate_admission_number(body.aadhar_number, body.first_name, body.last_name),
+        aadhar_number=body.aadhar_number,
         guardian_name=body.guardian_name,
         guardian_phone=body.guardian_phone,
         address=body.address,
@@ -730,6 +748,9 @@ async def create_student(body: StudentCreate, db: AsyncSession = Depends(get_db)
         )
         db.add(enrollment)
         await db.flush()
+        # No invoice generation needed: fees owed are computed on the fly
+        # from FeeStructure (see app.modules.fees.service.get_student_owed_amount)
+        # rather than pre-generated as rows, so there's nothing to create here.
 
     row = await _fetch_student_row(str(profile.id), db)
     if not row:
@@ -754,6 +775,14 @@ async def update_student(student_id: str, body: StudentUpdate, db: AsyncSession 
         profile.guardian_phone = body.guardian_phone
     if body.address is not None:
         profile.address = body.address
+    if body.aadhar_number is not None:
+        profile.aadhar_number = body.aadhar_number
+        # Regenerate the admission number now that Aadhar is known/changed,
+        # so editing in a missing Aadhar (for students created before this
+        # field existed) automatically gives them the correct formatted ID.
+        profile.admission_number = generate_admission_number(
+            body.aadhar_number, profile.first_name, profile.last_name
+        )
     user = await db.get(User, profile.user_id)
     if user and body.is_active is not None:
         user.is_active = body.is_active
@@ -815,21 +844,20 @@ async def get_student_financial(
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Student not found")
 
-    from app.modules.fees.models import Invoice
+    # Fees are now computed from FeeStructure/FeeReceipt rather than a
+    # separate Invoice table (which no longer exists), so reuse the same
+    # summary helper the Fees module itself uses for these numbers.
+    from app.modules.fees.service import get_current_academic_year, get_student_fee_summary
 
-    fees_result = await db.execute(
-        select(
-            sa_func.coalesce(sa_func.sum(Invoice.net_amount), 0).label("total_fees"),
-            sa_func.coalesce(sa_func.sum(
-                sa_func.case((Invoice.status == "PAID", Invoice.net_amount), else_=0)
-            ), 0).label("paid_amount"),
-            sa_func.max(Invoice.paid_at).label("last_payment_date"),
-        ).where(Invoice.student_id == student_id)
-    )
-    fees_row = fees_result.one()
-    total_fees = float(fees_row.total_fees)
-    paid_amount = float(fees_row.paid_amount)
-    due_amount = max(0, total_fees - paid_amount)
+    year = await get_current_academic_year(db)
+    total_fees = 0.0
+    paid_amount = 0.0
+    if year:
+        summary = await get_student_fee_summary(str(student_id), str(year.id), db)
+        total_fees = float(summary["owed"])
+        paid_amount = float(summary["paid"])
+
+    due_amount = max(0.0, total_fees - paid_amount)
     payment_status = (
         "paid" if total_fees > 0 and due_amount == 0
         else "partial" if paid_amount > 0
@@ -842,7 +870,7 @@ async def get_student_financial(
         admission_number=row.admission_number,
         student_group_name=row.student_group_name,
         total_fees=total_fees, paid_amount=paid_amount, due_amount=due_amount,
-        last_payment_date=fees_row.last_payment_date,
+        last_payment_date=None,
         payment_status=payment_status,
     )
 

@@ -18,6 +18,7 @@ class AcademicYearResponse(BaseModel):
     start_date: date
     end_date: date
     is_active: bool
+    is_current: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -169,6 +170,7 @@ class StudentProfileResponse(BaseModel):
     name: str | None = None
     date_of_birth: datetime | None = None
     admission_number: str
+    aadhar_number: str | None = None
     student_group_name: str | None = None
     section_name: str | None = None
     guardian_name: str | None = None
@@ -241,6 +243,7 @@ class StudentCreate(BaseModel):
     last_name: str
     email: str
     password: str
+    aadhar_number: str
     date_of_birth: date | None = None
     class_id: str | None = None
     academic_year_id: str | None = None
@@ -253,6 +256,7 @@ class StudentCreate(BaseModel):
 class StudentUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
+    aadhar_number: str | None = None
     date_of_birth: date | None = None
     guardian_name: str | None = None
     guardian_phone: str | None = None

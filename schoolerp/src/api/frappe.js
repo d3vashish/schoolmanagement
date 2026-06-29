@@ -1226,6 +1226,8 @@ export async function callMethod(method, args = {}) {
 
 // ─── Staff / HR API ───────────────────────────────────────────────────────────
 
+const STAFF_ROLES = ['teacher', 'accountant', 'librarian', 'principal', 'super_admin'];
+
 export async function getStaffList() {
   const [usersRes, instructorsRes] = await Promise.allSettled([
     client.get('/auth/users'),
@@ -1235,6 +1237,9 @@ export async function getStaffList() {
   const users = usersRes.status === 'fulfilled'
     ? (Array.isArray(usersRes.value.data) ? usersRes.value.data : usersRes.value.data?.data || usersRes.value.data?.results || [])
     : [];
+
+  // Only keep staff-role accounts — excludes student, parent, etc.
+  const staffUsers = users.filter(u => STAFF_ROLES.includes((u.role || '').toLowerCase()));
 
   const instructors = instructorsRes.status === 'fulfilled'
     ? (Array.isArray(instructorsRes.value.data) ? instructorsRes.value.data : instructorsRes.value.data?.data || instructorsRes.value.data?.results || [])
@@ -1249,7 +1254,7 @@ export async function getStaffList() {
   const combined = [];
   const seen = new Set();
 
-  users.forEach(u => {
+  staffUsers.forEach(u => {
     const key = u.email || u.id || u.name;
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -1261,15 +1266,17 @@ export async function getStaffList() {
       last_name: inst.last_name || u.last_name || '',
       full_name: `${inst.first_name || u.first_name || ''} ${inst.last_name || u.last_name || ''}`.trim() || u.email || key,
       role: u.role || 'teacher',
-      department: inst.department || '',
-      qualification: inst.qualification || '',
-      employee_id: inst.employee_id || '',
+      department: inst.department || u.department || '',
+      qualification: inst.qualification || u.qualification || '',
+      employee_id: inst.employee_id || u.employee_id || '',
       is_active: u.is_active ?? inst.is_active ?? true,
       phone: u.phone || inst.phone || '',
       user_id: inst.user_id || u.user_id || '',
     });
   });
 
+  // Instructors are staff by definition — no role filter needed here,
+  // but skip anyone already added above to avoid duplicates
   instructors.forEach(i => {
     const key = i.user_id || i.email || i.id;
     if (!key || seen.has(key)) return;
