@@ -49,8 +49,6 @@ const navGroups = [
   ]},
   { label: 'Examinations', iconColor: '#F97316', items: [
     { path: '/class-tests',  label: 'Class Tests',  icon: 'classtests'   },
-    { path: '/certificates', label: 'Certificates', icon: 'certificates' },
-    { path: '/reports',         label: 'Reports',       icon: 'reports'      },
     { path: '/exam-management', label: 'Exam Management', icon: 'exams'       },
   ]},
   { label: 'HR & Finance', iconColor: '#F59E0B', items: [

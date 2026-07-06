@@ -259,7 +259,7 @@ function SuccessView({ receipt, student, academicYearLabel, onNewPayment, onClos
 
 // ── Main modal ──────────────────────────────────────────────────────────────
 export default function RecordPaymentModal({ onClose }) {
-  const { selectedYear } = useAcademicYear();
+  const { selectedYear, selectedYearData } = useAcademicYear();
   const [student, setStudent] = useState(null);
   const [completedReceipt, setCompletedReceipt] = useState(null);
 
@@ -286,7 +286,7 @@ export default function RecordPaymentModal({ onClose }) {
           <SuccessView
             receipt={completedReceipt}
             student={student}
-            academicYearLabel={selectedYear}
+            academicYearLabel={selectedYearData?.name || ''}
             onNewPayment={handleNewPayment}
             onClose={onClose}
           />

@@ -29,8 +29,6 @@ const Salary = lazy(() => import('./pages/Salary'));
 const Timetable = lazy(() => import('./pages/Timetable'));
 const Homework = lazy(() => import('./pages/Homework'));
 const ClassTests = lazy(() => import('./pages/ClassTests'));
-const Certificates = lazy(() => import('./pages/Certificates'));
-const Reports = lazy(() => import('./pages/Reports'));
 const Library = lazy(() => import('./pages/Library'));
 const Admissions = lazy(() => import('./pages/Admissions'));
 const ParentDashboard = lazy(() => import('./pages/ParentDashboard'));
@@ -79,8 +77,7 @@ function App() {
                   {/* /exams removed: it was a Google-Classroom-only page (Exams.jsx)
                       with no FastAPI backing. exam-management is the real, working page. */}
                   <Route path="class-tests" element={<ClassTests />} />
-                  <Route path="certificates" element={<Certificates />} />
-                  <Route path="reports" element={<Reports />} />
+                
                   <Route path="exam-management" element={<ExamManagement />} />
 
                   {/* ── HR & Finance ── */}
