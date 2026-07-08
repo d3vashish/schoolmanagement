@@ -280,6 +280,8 @@ async def update_settings(
             db.add(setting)
         results.append(setting)
     await db.flush()
+    for s in results:
+        await db.refresh(s)
     return [SettingResponse(key=s.key, value=s.value, updated_at=s.updated_at) for s in results]
 
 

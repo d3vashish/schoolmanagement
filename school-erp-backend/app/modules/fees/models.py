@@ -30,6 +30,26 @@ class FeeStructure(Base, TimestampMixin):
     is_new_student = Column(Boolean, nullable=False, default=False, server_default="false")
 
     fee_head = relationship("FeeHead")
+    installments = relationship(
+        "FeeInstallment", back_populates="structure", cascade="all, delete-orphan"
+    )
+
+
+class FeeInstallment(Base, TimestampMixin):
+    """
+    One installment/term within a Fee Structure, e.g. "Term 1" due 31-03-2026
+    for 40% of the structure's total amount. A structure's installments must
+    add up to 100% (enforced in the API layer, not the DB) so the UI can
+    show a running "X% of 100%" total while the admin builds them out.
+    """
+    __tablename__ = "fee_installments"
+
+    structure_id = Column(UUID(as_uuid=True), ForeignKey("fee_structures.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(50), nullable=False)
+    due_date = Column(Date, nullable=False)
+    percent = Column(Numeric(5, 2), nullable=False)
+
+    structure = relationship("FeeStructure", back_populates="installments")
 
 
 class StudentDiscount(Base, TimestampMixin):

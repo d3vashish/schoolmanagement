@@ -37,6 +37,32 @@ class FeeStructureResponse(BaseModel):
     fee_head_name: str | None = None
     amount: Decimal
     is_new_student: bool
+    installment_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class FeeInstallmentCreate(BaseModel):
+    structure_id: UUID
+    name: str
+    due_date: date
+    percent: Decimal
+
+
+class FeeInstallmentUpdate(BaseModel):
+    name: str | None = None
+    due_date: date | None = None
+    percent: Decimal | None = None
+    # structure_id intentionally not editable — an installment always belongs
+    # to the structure it was created under.
+
+
+class FeeInstallmentResponse(BaseModel):
+    id: UUID
+    structure_id: UUID
+    name: str
+    due_date: date
+    percent: Decimal
 
     model_config = {"from_attributes": True}
 

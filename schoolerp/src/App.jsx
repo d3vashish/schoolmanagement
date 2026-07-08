@@ -23,9 +23,6 @@ const UserDetail = lazy(() => import('./pages/UserDetail'));
 const GeneralSettings = lazy(() => import('./pages/GeneralSettings'));
 const Subjects = lazy(() => import('./pages/Subjects'));
 const Classes = lazy(() => import('./pages/Classes'));
-const Employees = lazy(() => import('./pages/Employees'));
-const Accounts = lazy(() => import('./pages/Accounts'));
-const Salary = lazy(() => import('./pages/Salary'));
 const Timetable = lazy(() => import('./pages/Timetable'));
 const Homework = lazy(() => import('./pages/Homework'));
 const ClassTests = lazy(() => import('./pages/ClassTests'));
@@ -81,9 +78,7 @@ function App() {
                   <Route path="exam-management" element={<ExamManagement />} />
 
                   {/* ── HR & Finance ── */}
-                  <Route path="employees" element={<Employees />} />
-                  <Route path="salary" element={<Salary />} />
-                  <Route path="accounts" element={<Accounts />} />
+                  
                   <Route path="fees" element={<Fees />} />
 
                   {/* ── Parent Portal ── */}

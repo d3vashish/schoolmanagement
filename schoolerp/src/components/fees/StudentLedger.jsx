@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useStudentLedger, useLedgerSummary, useJournalEntries, INR, fmtDate } from '../../hooks/useFees';
+import { useAcademicYear } from '../../context/AcademicYearContext';
 
 export default function StudentLedger({ studentId, onRecordPayment, onJournalAdjust }) {
   const [tab, setTab] = useState('ledger');
+  const { selectedYear } = useAcademicYear();
   const { data: entries = [], isLoading: loadingEntries } = useStudentLedger(studentId);
-  const { data: summary, isLoading: loadingSummary } = useLedgerSummary(studentId);
+  const { data: summary, isLoading: loadingSummary } = useLedgerSummary(studentId, selectedYear);
   const { data: adjustments = [] } = useJournalEntries(studentId);
   const [dismissed, setDismissed] = useState(new Set());
 

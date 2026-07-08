@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAcademicYear } from '../../context/AcademicYearContext';
+import { downloadReceiptPdf } from '../../lib/receiptPdf';
 import {
   useClassSummary,
   useStudentsBySection,
@@ -16,8 +17,23 @@ const num = (v) => {
 
 // Fee summary card — identical shape to the one on the Dashboard tab, so a
 // student looks the same no matter which tab you found them from.
-function ReceiptRow({ receipt }) {
+function ReceiptRow({ receipt, student, academicYearLabel }) {
   const dt = receipt.created_at ? new Date(receipt.created_at) : null;
+
+  const handleDownload = () => {
+    downloadReceiptPdf({
+      receipt_number: receipt.receipt_number,
+      student_name: student?.student_name,
+      class_section: `${student?.student_group_name || ''}${student?.section_name ? ' - ' + student.section_name : ''}`,
+      academic_year: academicYearLabel,
+      amount: receipt.amount,
+      mode: receipt.mode,
+      reference_no: receipt.reference_no,
+      notes: receipt.notes,
+      created_at: receipt.created_at,
+    });
+  };
+
   return (
     <div className="px-5 py-3 flex items-center justify-between border-b border-gray-50 last:border-b-0">
       <div>
@@ -27,19 +43,32 @@ function ReceiptRow({ receipt }) {
           {receipt.reference_no ? ` • Ref: ${receipt.reference_no}` : ''}
         </p>
       </div>
-      <div className="text-right">
-        <p className="text-xs text-gray-500">
-          {dt ? dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
-        </p>
-        <p className="text-xs text-gray-400">
-          {dt ? dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
-        </p>
+      <div className="flex items-center gap-4">
+        <div className="text-right">
+          <p className="text-xs text-gray-500">
+            {dt ? dt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+          </p>
+          <p className="text-xs text-gray-400">
+            {dt ? dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
+          </p>
+        </div>
+        <button
+          onClick={handleDownload}
+          title="Download receipt"
+          className="flex items-center gap-1 text-xs font-medium text-[var(--color-primary)] hover:opacity-70 transition shrink-0"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+              d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16" />
+          </svg>
+          Receipt
+        </button>
       </div>
     </div>
   );
 }
 
-function PaymentHistory({ studentId }) {
+function PaymentHistory({ studentId, student, academicYearLabel }) {
   const { data: receipts = [], isLoading, error } = useReceipts(studentId);
 
   if (isLoading) {
@@ -54,7 +83,9 @@ function PaymentHistory({ studentId }) {
 
   return (
     <div className="divide-y divide-gray-50">
-      {receipts.map(r => <ReceiptRow key={r.id} receipt={r} />)}
+      {receipts.map(r => (
+        <ReceiptRow key={r.id} receipt={r} student={student} academicYearLabel={academicYearLabel} />
+      ))}
     </div>
   );
 }
@@ -62,7 +93,8 @@ function PaymentHistory({ studentId }) {
 // Fee summary card — identical shape to the one on the Dashboard tab, so a
 // student looks the same no matter which tab you found them from.
 function StudentFeeSummaryCard({ student, onBack }) {
-  const { data: summary, isLoading, error } = useStudentFeeSummary(student.id);
+  const { selectedYear, selectedYearData } = useAcademicYear();
+  const { data: summary, isLoading, error } = useStudentFeeSummary(student.id, selectedYear);
   const [showDetails, setShowDetails] = useState(false);
 
   return (
@@ -122,7 +154,7 @@ function StudentFeeSummaryCard({ student, onBack }) {
           <div className="px-5 py-3 bg-gray-50/60">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Payment History</p>
           </div>
-          <PaymentHistory studentId={student.id} />
+          <PaymentHistory studentId={student.id} student={student} academicYearLabel={selectedYearData?.name} />
         </div>
       )}
     </div>

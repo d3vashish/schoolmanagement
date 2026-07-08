@@ -39,7 +39,8 @@ function StudentResultRow({ student, onSelect }) {
 
 // Fee summary card shown after a student is selected from search.
 function StudentFeeSummaryCard({ student, onClear }) {
-  const { data: summary, isLoading, error } = useStudentFeeSummary(student.id);
+  const { selectedYear } = useAcademicYear();
+  const { data: summary, isLoading, error } = useStudentFeeSummary(student.id, selectedYear);
 
   return (
     <div className="card !p-0 overflow-hidden">

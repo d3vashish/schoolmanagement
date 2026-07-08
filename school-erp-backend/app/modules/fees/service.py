@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.academic.models import AcademicYear
-from app.modules.fees.models import FeeHead, FeeReceipt, FeeStructure, StudentDiscount
+from app.modules.fees.models import FeeHead, FeeInstallment, FeeReceipt, FeeStructure, StudentDiscount
 
 
 async def get_current_academic_year(db: AsyncSession) -> AcademicYear | None:
@@ -47,10 +47,23 @@ async def get_structures_detailed(
             FeeHead.name.label("fee_head_name"),
             FeeStructure.amount,
             FeeStructure.is_new_student,
+            func.count(FeeInstallment.id).label("installment_count"),
         )
         .select_from(FeeStructure)
         .join(Class, Class.id == FeeStructure.class_id)
         .join(FeeHead, FeeHead.id == FeeStructure.fee_head_id)
+        .outerjoin(FeeInstallment, FeeInstallment.structure_id == FeeStructure.id)
+        .group_by(
+            FeeStructure.id,
+            FeeStructure.academic_year_id,
+            FeeStructure.class_id,
+            Class.name,
+            Class.order,
+            FeeStructure.fee_head_id,
+            FeeHead.name,
+            FeeStructure.amount,
+            FeeStructure.is_new_student,
+        )
         .order_by(Class.order, FeeStructure.is_new_student)
     )
 
@@ -72,6 +85,7 @@ async def get_structures_detailed(
             "fee_head_name": row.fee_head_name,
             "amount": row.amount,
             "is_new_student": row.is_new_student,
+            "installment_count": row.installment_count,
         }
         for row in rows
     ]
@@ -394,7 +408,7 @@ async def get_student_ledger(
     return result.scalars().all()
 
 
-async def get_ledger_summary(db: AsyncSession, student_id: str) -> dict:
+async def get_ledger_summary(db: AsyncSession, student_id: str, academic_year_id: str | None = None) -> dict:
     from app.modules.fees.models import StudentLedgerEntry
 
     paid_result = await db.execute(
@@ -412,10 +426,20 @@ async def get_ledger_summary(db: AsyncSession, student_id: str) -> dict:
     )
     last_entry = last_result.scalar()
 
-    year = await get_current_academic_year(db)
+    # Use whichever academic year the caller/UI has selected (e.g. the
+    # dropdown on the Fees page) so this matches the Structures/Dashboard
+    # tabs. Previously this always fell back to the globally "active" year
+    # regardless of what year was selected, which made Total Due show ₹0
+    # (and the balance go negative) whenever the selected year wasn't the
+    # active one.
+    resolved_year_id = academic_year_id
+    if not resolved_year_id:
+        year = await get_current_academic_year(db)
+        resolved_year_id = str(year.id) if year else None
+
     total_due = Decimal("0")
-    if year:
-        total_due = await get_student_owed_amount(student_id, str(year.id), db)
+    if resolved_year_id:
+        total_due = await get_student_owed_amount(student_id, resolved_year_id, db)
 
     return {
         "student_id": student_id,

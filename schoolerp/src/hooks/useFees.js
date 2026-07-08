@@ -429,11 +429,13 @@ export function useStudentLedger(studentId, options = {}) {
   });
 }
 
-export function useLedgerSummary(studentId, options = {}) {
+export function useLedgerSummary(studentId, academicYearId, options = {}) {
   return useQuery({
-    queryKey: ['Fees', 'ledger-summary', studentId],
+    queryKey: ['Fees', 'ledger-summary', studentId, academicYearId],
     queryFn: async () => {
-      const res = await client.get(`/fees/ledger/${studentId}/summary`);
+      const res = await client.get(`/fees/ledger/${studentId}/summary`, {
+        params: academicYearId ? { academic_year_id: academicYearId } : undefined,
+      });
       return res.data;
     },
     enabled: !!studentId,
@@ -589,11 +591,13 @@ export function useStudentSearch(searchTerm, options = {}) {
 // Per-student fee summary (total_due, total_paid, balance).
 // Backed by GET /fees/ledger/{student_id}/summary — same endpoint useLedgerSummary
 // already uses, exposed here under a name that reads naturally in the dashboard.
-export function useStudentFeeSummary(studentId, options = {}) {
+export function useStudentFeeSummary(studentId, academicYearId, options = {}) {
   return useQuery({
-    queryKey: ['Fees', 'ledger-summary', studentId],
+    queryKey: ['Fees', 'ledger-summary', studentId, academicYearId],
     queryFn: async () => {
-      const res = await client.get(`/fees/ledger/${studentId}/summary`);
+      const res = await client.get(`/fees/ledger/${studentId}/summary`, {
+        params: academicYearId ? { academic_year_id: academicYearId } : undefined,
+      });
       return res.data;
     },
     enabled: !!studentId,
@@ -650,7 +654,12 @@ export function useCreateFeeStructureDetailed() {
       const res = await client.post('/fees/structures', data);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fee Structures'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'class-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'defaulters'] });
+    },
   });
 }
  
@@ -661,7 +670,12 @@ export function useUpdateFeeStructureDetailed() {
       const res = await client.patch(`/fees/structures/${id}`, data);
       return res.data;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fee Structures'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'class-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'defaulters'] });
+    },
   });
 }
  

@@ -75,7 +75,7 @@ function StudentPicker({ onSelect }) {
 
 // ── Step 2: payment form for the selected student ──────────────────────────
 function PaymentForm({ student, academicYear, onBack, onRecorded }) {
-  const { data: summary } = useStudentFeeSummary(student.id);
+  const { data: summary } = useStudentFeeSummary(student.id, academicYear);
   const { data: modes = [] } = usePaymentModes();
   const recordPayment = useRecordPayment();
 

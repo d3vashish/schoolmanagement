@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.deps import QueryScoper, get_current_user, role_required
 from app.modules.fees.models import (
     FeeHead,
+    FeeInstallment,
     FeeReceipt,
     FeeStructure,
     JournalEntry,
@@ -21,6 +22,9 @@ from app.modules.fees.schemas import (
     DefaulterResponse,
     FeeHeadCreate,
     FeeHeadResponse,
+    FeeInstallmentCreate,
+    FeeInstallmentResponse,
+    FeeInstallmentUpdate,
     FeeReceiptCreate,
     FeeReceiptResponse,
     FeeStructureCreate,
@@ -138,6 +142,61 @@ async def delete_structure(structure_id: str, db: AsyncSession = Depends(get_db)
     struct = await db.get(FeeStructure, structure_id)
     if not struct:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+
+# ── Fee Installments ─────────────────────────────────────────────────────────
+# One structure (e.g. "1st Standard / Old Student / School Fee") is split into
+# installments — Term 1, Term 2, etc — each covering a percent of the total.
+# The structure-create UI requires these to add up to 100%; enforcing that
+# is left to the frontend, same as it already validates required fields there.
+
+@router.get(
+    "/structures/{structure_id}/installments",
+    response_model=list[FeeInstallmentResponse],
+    dependencies=all_auth,
+)
+async def list_installments(structure_id: str, db: AsyncSession = Depends(get_db)):
+    struct = await db.get(FeeStructure, structure_id)
+    if not struct:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee structure not found")
+    result = await db.execute(
+        select(FeeInstallment)
+        .where(FeeInstallment.structure_id == structure_id)
+        .order_by(FeeInstallment.due_date)
+    )
+    return result.scalars().all()
+
+
+@router.post("/installments", response_model=FeeInstallmentResponse, dependencies=admin_only)
+async def create_installment(body: FeeInstallmentCreate, db: AsyncSession = Depends(get_db)):
+    struct = await db.get(FeeStructure, body.structure_id)
+    if not struct:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Fee structure not found")
+    installment = FeeInstallment(**body.model_dump())
+    db.add(installment)
+    await db.flush()
+    return installment
+
+
+@router.patch("/installments/{installment_id}", response_model=FeeInstallmentResponse, dependencies=admin_only)
+async def update_installment(installment_id: str, body: FeeInstallmentUpdate, db: AsyncSession = Depends(get_db)):
+    installment = await db.get(FeeInstallment, installment_id)
+    if not installment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Installment not found")
+    updates = body.model_dump(exclude_unset=True)
+    for field, value in updates.items():
+        setattr(installment, field, value)
+    await db.flush()
+    return installment
+
+
+@router.delete("/installments/{installment_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=admin_only)
+async def delete_installment(installment_id: str, db: AsyncSession = Depends(get_db)):
+    installment = await db.get(FeeInstallment, installment_id)
+    if not installment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Installment not found")
+    await db.delete(installment)
+    await db.flush()
     await db.delete(struct)
 
 
@@ -269,10 +328,11 @@ async def list_ledger_entries(
 @router.get("/ledger/{student_id}/summary", response_model=LedgerSummaryResponse)
 async def student_ledger_summary(
     student_id: str,
+    academic_year_id: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    summary = await get_ledger_summary(db, student_id)
+    summary = await get_ledger_summary(db, student_id, academic_year_id)
     return summary
 
 

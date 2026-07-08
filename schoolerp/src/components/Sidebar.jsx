@@ -52,9 +52,6 @@ const navGroups = [
     { path: '/exam-management', label: 'Exam Management', icon: 'exams'       },
   ]},
   { label: 'HR & Finance', iconColor: '#F59E0B', items: [
-    { path: '/employees', label: 'Employees', icon: 'employees' },
-    { path: '/salary',    label: 'Salary',    icon: 'salary'    },
-    { path: '/accounts',  label: 'Accounts',  icon: 'accounts'  },
     { path: '/fees',      label: 'Fees',      icon: 'fees'      },
   ]},
   { label: 'Admin', iconColor: '#FBBF24', items: [
