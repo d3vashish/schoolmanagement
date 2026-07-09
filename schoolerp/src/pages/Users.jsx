@@ -153,83 +153,88 @@ export default function Users() {
         </div>
       </div>
 
-      {/* Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+      {/* Add member bar */}
+      <div className="flex justify-end">
         <button
           onClick={() => setShowModal(true)}
-          className="group bg-white rounded-[28px] border-2 border-dashed border-[#e2e8f0] p-8 flex flex-col items-center justify-center min-h-[280px] transition-[border-color,background-color,transform,box-shadow] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:border-[#2ED05D] hover:bg-[#E8F9ED]/40 cursor-pointer active:scale-[0.97]"
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#2ED05D] text-white font-bold text-sm shadow-sm hover:bg-[#25B04E] transition-colors active:scale-[0.97]"
         >
-          <div className="w-[72px] h-[72px] rounded-[20px] bg-white border border-[#f1f5f9] shadow-[0_4px_12px_rgba(0,0,0,0.04)] flex items-center justify-center mb-5 transition-[transform,color,border-color] duration-200 group-hover:scale-110 group-hover:border-[#BBF7D0] group-hover:shadow-[0_8px_24px_rgba(46,208,93,0.12)]">
-            <svg className="w-7 h-7 text-[#B0ABA4] transition-colors duration-200 group-hover:text-[#2ED05D]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </div>
-          <span className="font-bold text-sm text-[#8A8680] transition-colors duration-200 group-hover:text-[#25B04E]">Add Team Member</span>
-          <span className="text-xs text-[#B0ABA4] mt-1 transition-colors duration-200 group-hover:text-[#B0ABA4]">Invite a new member</span>
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          Add Team Member
         </button>
+      </div>
 
-        {users.map((user, i) => {
-          const colors = avatarColors[i % avatarColors.length];
-          return (
-            <div
-              key={user.id}
-              className="group relative bg-white rounded-[28px] p-7 border border-[#f1f5f9]/80 shadow-[0_2px_8px_rgba(0,0,0,0.02),0_1px_2px_rgba(0,0,0,0.02)] transition-[border-color,transform,box-shadow] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] hover:shadow-[0_12px_40px_-8px_rgba(0,0,0,0.06),0_4px_12px_-4px_rgba(0,0,0,0.03)] hover:border-[#BBF7D0] cursor-pointer flex flex-col min-h-[280px] active:scale-[0.98]"
-              onClick={() => navigate(`/admin/users/${user.id}`)}
-            >
-              {/* Top row: avatar + status */}
-              <div className="flex items-start justify-between mb-5">
-                <div
-                  className="w-[56px] h-[56px] rounded-[16px] flex items-center justify-center text-white font-extrabold text-xl shadow-[inset_0_2px_4px_rgba(0,0,0,0.08)] ring-[3px] ring-white/60 shrink-0"
-                  style={{ backgroundImage: `linear-gradient(135deg, ${colors.from}, ${colors.to})` }}
+      {/* List / Table */}
+      <div className="bg-white rounded-2xl border border-[#f1f5f9] shadow-[0_2px_8px_rgba(0,0,0,0.02)] overflow-x-auto">
+        <table className="w-full text-sm min-w-[640px]">
+          <thead>
+            <tr className="bg-[#f8fafc] text-left text-[#8A8680] text-xs uppercase tracking-wider">
+              <th className="px-5 py-3 font-semibold">Name</th>
+              <th className="px-5 py-3 font-semibold">Email</th>
+              <th className="px-5 py-3 font-semibold">Role</th>
+              <th className="px-5 py-3 font-semibold">Status</th>
+              <th className="px-5 py-3 font-semibold text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user, i) => {
+              const colors = avatarColors[i % avatarColors.length];
+              return (
+                <tr
+                  key={user.id}
+                  className="border-t border-[#f1f5f9] hover:bg-[#f8fafc] cursor-pointer transition-colors"
+                  onClick={() => navigate(`/admin/users/${user.id}`)}
                 >
-                  {getInitials(user.first_name, user.last_name)}
-                </div>
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#f1f5f9]/50 transition-[background-color] duration-200 group-hover:bg-[#f1f5f9]">
-                  <span className={`w-[6px] h-[6px] rounded-full ${user.is_active ? 'bg-emerald-500' : 'bg-red-400'}`} />
-                  <span className="text-[10px] font-bold text-[#8A8680] uppercase tracking-wider">{user.is_active ? 'Active' : 'Inactive'}</span>
-                </div>
-              </div>
-
-              {/* Name + email */}
-              <div className="mb-4">
-                <h3 className="font-extrabold text-[#2D2A24] text-[17px] leading-tight tracking-tight truncate">
-                  {user.first_name || user.email} {user.last_name || ''}
-                </h3>
-                <p className="text-sm font-medium text-[#8A8680] truncate mt-0.5" title={user.email}>{user.email}</p>
-              </div>
-
-              {/* Role tag */}
-              <div className="flex flex-wrap gap-1.5 mb-5 flex-1 content-start">
-                <span className={`text-[11px] font-bold px-2.5 py-1 rounded-[8px] ${getRoleColor(user.role)}`}>
-                  {ROLE_LABELS[user.role] || user.role}
-                </span>
-              </div>
-
-              {/* Bottom bar */}
-              <div className="flex items-center justify-between pt-4 border-t border-[#f1f5f9]">
-                <span className="text-sm font-semibold text-[#B0ABA4] transition-colors duration-200 group-hover:text-[#2ED05D] flex items-center gap-1.5">
-                  View Profile
-                  <svg className="w-3.5 h-3.5 transition-[opacity,transform] duration-200 -translate-x-1 opacity-0 group-hover:opacity-100 group-hover:translate-x-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-                  </svg>
-                </span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleToggleStatus(user); }}
-                  className={`p-2 transition-[color,background-color,transform] duration-200 ease-[cubic-bezier(0.25,0.1,0.25,1)] rounded-[10px] cursor-pointer active:scale-[0.92] ${user.is_active ? 'text-[#B0ABA4] hover:text-red-500 hover:bg-red-50' : 'text-[#2ED05D] hover:text-emerald-600 hover:bg-emerald-50'}`}
-                  title={user.is_active ? 'Disable User' : 'Enable User'}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    {user.is_active ? (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    ) : (
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    )}
-                  </svg>
-                </button>
-              </div>
-            </div>
-          );
-        })}
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-9 h-9 rounded-[12px] flex items-center justify-center text-white font-extrabold text-sm shrink-0"
+                        style={{ backgroundImage: `linear-gradient(135deg, ${colors.from}, ${colors.to})` }}
+                      >
+                        {getInitials(user.first_name, user.last_name)}
+                      </div>
+                      <span className="font-bold text-[#2D2A24] truncate">
+                        {user.first_name || user.email} {user.last_name || ''}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 text-[#8A8680] font-medium truncate" title={user.email}>{user.email}</td>
+                  <td className="px-5 py-3">
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-[8px] ${getRoleColor(user.role)}`}>
+                      {ROLE_LABELS[user.role] || user.role}
+                    </span>
+                  </td>
+                  <td className="px-5 py-3">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className={`w-[6px] h-[6px] rounded-full ${user.is_active ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                      <span className="text-[11px] font-bold text-[#8A8680] uppercase tracking-wider">{user.is_active ? 'Active' : 'Inactive'}</span>
+                    </span>
+                  </td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center justify-end gap-3">
+                      <span className="text-[#2ED05D] font-semibold hidden sm:inline">View</span>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleStatus(user); }}
+                        className={`p-2 rounded-[10px] transition-colors ${user.is_active ? 'text-[#B0ABA4] hover:text-red-500 hover:bg-red-50' : 'text-[#2ED05D] hover:text-emerald-600 hover:bg-emerald-50'}`}
+                        title={user.is_active ? 'Disable User' : 'Enable User'}
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          {user.is_active ? (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          ) : (
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          )}
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {totalPages > 1 && (

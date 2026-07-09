@@ -146,6 +146,7 @@ class PromotionRequest(BaseModel):
     from_academic_year_id: UUID
     to_academic_year_id: UUID
     to_class_id: UUID
+    to_section_id: UUID | None = None
 
 
 class ProgressionResponse(BaseModel):
@@ -251,6 +252,7 @@ class StudentCreate(BaseModel):
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
+    is_new_student: bool | None = None
 
 
 class StudentUpdate(BaseModel):

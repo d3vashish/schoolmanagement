@@ -50,6 +50,7 @@ export default function Students() {
   first_name: '', last_name: '', gender: '', date_of_birth: '', blood_group: '',
   aadhar_number: '', student_email: '', student_mobile: '', address_line1: '', city: '', state: '',
   pincode: '', guardian_name: '', guardian_relation: '', guardian_mobile: '', guardian_email: '',
+  student_type: 'new',
 };
   const [formData, setFormData] = useState(emptyForm);
 
@@ -177,7 +178,7 @@ export default function Students() {
 
   // Fetch students
   const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
-    queryKey: ['Student', 'students', selectedSection?.id || selectedSection?.name, studentPage, search],
+    queryKey: ['Student', 'students', selectedSection?.id || selectedSection?.name, studentPage, search, selectedYear],
     queryFn: async () => {
       const sectionIdToUse = selectedSection?.id || selectedSection?.name;
       if (!sectionIdToUse) {
@@ -191,6 +192,7 @@ export default function Students() {
         per_page: String(STUDENTS_PER_PAGE),
       });
       if (search) params.set('search', search);
+      if (selectedYear) params.set('academic_year_id', selectedYear);
 
       console.log('[Students] queryFn firing with params:', params.toString(), 'section:', sectionIdToUse);
       const res = await client.get(`/academic/students?${params}`);
@@ -249,6 +251,7 @@ export default function Students() {
       class_id: selectedSection?.class_id || null,
       section_id: selectedSection?.id || null,
       academic_year_id: selectedYear || null,
+      is_new_student: data.student_type === 'new',
     });
     
     return res.data;
@@ -323,6 +326,7 @@ export default function Students() {
       first_name: formData.first_name,
       student_email_id: formData.student_email,
       aadhar_number: formData.aadhar_number || undefined,
+      student_type: formData.student_type,
       ...(formData.last_name && { last_name: formData.last_name }),
       ...(formData.gender && { gender: formData.gender }),
       ...(formData.date_of_birth && { date_of_birth: formData.date_of_birth }),
@@ -845,6 +849,13 @@ export default function Students() {
                     {['A+','A-','B+','B-','O+','O-','AB+','AB-'].map(bg => (
                       <option key={bg} value={bg}>{bg}</option>
                     ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Student Type</label>
+                  <select name="student_type" value={formData.student_type} onChange={handleInputChange} className="input">
+                    <option value="new">New Student</option>
+                    <option value="old">Old Student</option>
                   </select>
                 </div>
                 <div>

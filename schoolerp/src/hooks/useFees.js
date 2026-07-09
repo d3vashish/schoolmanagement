@@ -604,13 +604,13 @@ export function useStudentFeeSummary(studentId, academicYearId, options = {}) {
     ...options,
   });
 }
-export function useStudentsBySection(sectionId, options = {}) {
+export function useStudentsBySection(sectionId, academicYearId, options = {}) {
   return useQuery({
-    queryKey: ['Students', 'by-section', sectionId],
+    queryKey: ['Students', 'by-section', sectionId, academicYearId],
     queryFn: async () => {
-      const res = await client.get('/academic/students', {
-        params: { section_id: sectionId, page: 1, per_page: 200 },
-      });
+      const params = { section_id: sectionId, page: 1, per_page: 200 };
+      if (academicYearId) params.academic_year_id = academicYearId;
+      const res = await client.get('/academic/students', { params });
       return res.data?.data || [];
     },
     enabled: !!sectionId,

@@ -598,7 +598,7 @@ export default function Timetable() {
                 </label>
                 <select {...register('instructor_id')} className="input">
                   <option value="">Select Teacher</option>
-                  {instructors.map(i => <option key={i.user_id} value={i.user_id}>{i.first_name} {i.last_name || ''}</option>)}
+                  {instructors.map(i => <option key={i.id} value={i.id}>{i.first_name} {i.last_name || ''}</option>)}
                 </select>
                 {errors.instructor_id && <p className="text-xs text-red-500 mt-1">{errors.instructor_id.message}</p>}
               </div>

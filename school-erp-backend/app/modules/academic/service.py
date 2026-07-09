@@ -19,6 +19,7 @@ async def promote_students(
     to_academic_year_id: UUID,
     to_class_id: UUID,
     promoted_by_user_id: UUID,
+    to_section_id: UUID | None = None,
 ) -> list[AcademicProgression]:
     from_year = await db.get(AcademicYear, from_academic_year_id)
     to_year = await db.get(AcademicYear, to_academic_year_id)
@@ -88,6 +89,7 @@ async def promote_students(
         new_enrollment = Enrollment(
             student_id=student.id,
             class_id=to_class_id,
+            section_id=to_section_id,
             academic_year_id=to_academic_year_id,
             status="ACTIVE",
             enrolled_at=now,

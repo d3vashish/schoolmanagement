@@ -35,6 +35,7 @@ const AdminDashboard = lazy(() => import('./pages/AdminDashboard'));
 const AuditLog = lazy(() => import('./pages/AuditLog'));
 const AdminUserDetail = lazy(() => import('./pages/AdminUserDetail'));
 const StudentLookup = lazy(() => import('./pages/StudentLookup'));
+const Promotion = lazy(() => import('./pages/Promotion'));
 
 const PageLoader = () => (
   <div className="flex items-center justify-center py-20">
@@ -64,6 +65,7 @@ function App() {
                   <Route path="students/:id" element={<StudentDetail />} />
                   <Route path="subjects" element={<Subjects />} />
                   <Route path="classes" element={<Classes />} />
+                  <Route path="promotion" element={<Promotion />} />
                   <Route path="attendance" element={<Attendance />} />
                   <Route path="timetable" element={<Timetable />} />
                   <Route path="homework" element={<Homework />} />

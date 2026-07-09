@@ -431,6 +431,7 @@ async def promote(
             from_academic_year_id=body.from_academic_year_id,
             to_academic_year_id=body.to_academic_year_id,
             to_class_id=body.to_class_id,
+            to_section_id=body.to_section_id,
             promoted_by_user_id=current_user["id"],
         )
     except PromotionError as e:
@@ -467,6 +468,7 @@ async def list_progressions(
 @router.get("/students", response_model=PaginatedStudentResponse)
 async def list_students(
     section_id: Optional[str] = None,
+    academic_year_id: Optional[str] = None,
     search: Optional[str] = None,
     page: int = 1,
     per_page: int = 100,
@@ -476,6 +478,21 @@ async def list_students(
     enrollment_alias = Enrollment.__table__.alias()
     academic_class_alias = AcademicClass.__table__.alias()
     section_alias = Section.__table__.alias()
+
+    # Match the enrollment for the SELECTED year (so each year shows that year's
+    # placement). If no year is given, fall back to the current ACTIVE enrollment.
+    enr_conditions = [enrollment_alias.c.student_id == StudentProfile.id]
+    _year_ok = False
+    if academic_year_id:
+        try:
+            UUID(academic_year_id)
+            _year_ok = True
+        except ValueError:
+            _year_ok = False
+    if _year_ok:
+        enr_conditions.append(enrollment_alias.c.academic_year_id == academic_year_id)
+    else:
+        enr_conditions.append(enrollment_alias.c.status == "ACTIVE")
 
     query = select(
         StudentProfile.id,
@@ -496,10 +513,7 @@ async def list_students(
         User.email,
         User.is_active,
     ).join(User, StudentProfile.user_id == User.id
-    ).outerjoin(enrollment_alias, sa_and_(
-        enrollment_alias.c.student_id == StudentProfile.id,
-        enrollment_alias.c.status == "ACTIVE",
-    )
+    ).outerjoin(enrollment_alias, sa_and_(*enr_conditions)
     ).outerjoin(academic_class_alias, enrollment_alias.c.class_id == academic_class_alias.c.id
     ).outerjoin(section_alias, enrollment_alias.c.section_id == section_alias.c.id
     ).where(User.deleted_at.is_(None), User.is_active.is_(True))
@@ -728,6 +742,7 @@ async def create_student(body: StudentCreate, db: AsyncSession = Depends(get_db)
         guardian_name=body.guardian_name,
         guardian_phone=body.guardian_phone,
         address=body.address,
+        is_new_student=body.is_new_student,
     )
     db.add(profile)
     await db.flush()
@@ -1426,4 +1441,3 @@ async def delete_teacher_assignment(
         raise HTTPException(status_code=404, detail="Assignment not found")
     await db.delete(assignment)
     await db.flush()
-

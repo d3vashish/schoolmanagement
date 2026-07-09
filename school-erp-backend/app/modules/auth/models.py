@@ -43,6 +43,7 @@ class StudentProfile(Base, TimestampMixin):
     guardian_name = Column(String(200), nullable=True)
     guardian_phone = Column(String(20), nullable=True)
     address = Column(Text, nullable=True)
+    is_new_student = Column(Boolean, nullable=True)
 
     user = relationship("User", back_populates="student_profiles")
 

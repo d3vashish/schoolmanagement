@@ -36,7 +36,7 @@ export default function Topbar() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const roleLabel = getPrimaryRole(user?.roles || []);
-  const { selectedYear, setSelectedYear, academicYears, isCurrentYear, isTeacher } = useAcademicYear();
+  const { selectedYear, setSelectedYear, academicYears, isCurrentYear, currentYear, isTeacher } = useAcademicYear();
   const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead } = useNotifications();
   const [search, setSearch] = useState('');
   const [showProfile, setShowProfile] = useState(false);
@@ -121,9 +121,16 @@ export default function Topbar() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
               <span className="font-bold text-[#2ED05D]">{selectedYearName}</span>
-              {!isCurrentYear && selectedYear && (
-                <span className="px-1 py-0.5 bg-[#D1FAE5] text-[#047857] rounded text-[9px] font-bold">PREV</span>
-              )}
+              {!isCurrentYear && selectedYear && (() => {
+                const sel = academicYears.find(y => y.id === selectedYear);
+                const cur = academicYears.find(y => y.id === currentYear);
+                const isPast = sel && cur && new Date(sel.start_date) < new Date(cur.start_date);
+                return (
+                  <span className="px-1 py-0.5 bg-[#D1FAE5] text-[#047857] rounded text-[9px] font-bold">
+                    {isPast ? 'PREV' : 'NEXT'}
+                  </span>
+                );
+              })()}
               <svg className={`w-3 h-3 text-[#2ED05D] transition-transform ${showYearDropdown ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>

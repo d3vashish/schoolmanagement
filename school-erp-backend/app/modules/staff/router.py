@@ -1,3 +1,5 @@
+from datetime import date as date_type
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,11 +10,14 @@ from app.modules.staff.models import (
     PayrollRecord,
     PayrollRun,
     SalarySlip,
+    StaffAttendance,
     StaffLeave,
 )
 from app.modules.staff.schemas import (
     PayrollRecordResponse,
     PayrollRunResponse,
+    StaffAttendanceMark,
+    StaffAttendanceResponse,
     StaffLeaveCreate,
     StaffLeaveResponse,
 )
@@ -116,3 +121,48 @@ async def list_salary_slips(staff_id: str | None = None, db: AsyncSession = Depe
         }
         for s in slips
     ]
+
+
+# ─── Teacher / Staff Attendance ──────────────────────────────────────────────
+
+@router.post("/attendance/mark-bulk", dependencies=admin_only)
+async def mark_staff_attendance_bulk(
+    records: list[StaffAttendanceMark],
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    saved = 0
+    for r in records:
+        existing = await db.execute(
+            select(StaffAttendance).where(
+                StaffAttendance.staff_id == r.staff_id,
+                StaffAttendance.date == r.date,
+            )
+        )
+        row = existing.scalar_one_or_none()
+        if row:
+            row.status = r.status.upper()
+            row.marked_by = current_user["id"]
+            row.remarks = r.remarks
+        else:
+            db.add(StaffAttendance(
+                staff_id=r.staff_id,
+                date=r.date,
+                status=r.status.upper(),
+                marked_by=current_user["id"],
+                remarks=r.remarks,
+            ))
+        saved += 1
+    await db.flush()
+    return {"marked": saved}
+
+
+@router.get("/attendance", response_model=list[StaffAttendanceResponse], dependencies=admin_only)
+async def list_staff_attendance(
+    date: date_type = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(StaffAttendance).where(StaffAttendance.date == date)
+    )
+    return result.scalars().all()

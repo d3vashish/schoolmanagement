@@ -228,7 +228,8 @@ function StudentSearchBox({ searchTerm, setSearchTerm, onSelectStudent }) {
   );
 }
 function StudentRoster({ section, onSelectStudent }) {
-  const { data: students = [], isLoading, error } = useStudentsBySection(section.section_id);
+  const { selectedYear } = useAcademicYear();
+  const { data: students = [], isLoading, error } = useStudentsBySection(section.section_id, selectedYear);
 
   if (isLoading) {
     return <div className="px-5 py-6 text-center text-sm text-gray-400">Loading students...</div>;

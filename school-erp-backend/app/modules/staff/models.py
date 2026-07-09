@@ -58,3 +58,17 @@ class SalarySlip(Base, TimestampMixin):
     staff_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     pdf_url = Column(String(500), nullable=True)
     generated_at = Column(Date, nullable=True)
+
+
+class StaffAttendance(Base, TimestampMixin):
+    __tablename__ = "staff_attendance"
+
+    staff_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
+    status = Column(String(10), nullable=False)          # PRESENT / ABSENT / LEAVE
+    marked_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    remarks = Column(String(255), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("staff_id", "date", name="uq_staff_attendance_staff_date"),
+    )

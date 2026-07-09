@@ -104,7 +104,17 @@ async def is_new_student_for_year(student_id: str, academic_year_id: str, db: As
     enrollment record (across all years) falls in that same academic year.
     If they have any enrollment from an earlier year, they're continuing
     ("old"), even if they've since moved up a class or section.
+
+    Manual override: if an admin explicitly set New/Old on the student
+    record (is_new_student is not None), that choice wins. Otherwise we
+    fall back to the automatic enrollment-history logic below.
     """
+    from app.modules.auth.models import StudentProfile
+
+    profile = await db.get(StudentProfile, student_id)
+    if profile is not None and profile.is_new_student is not None:
+        return profile.is_new_student
+
     from app.modules.academic.models import Enrollment
 
     earliest = await db.execute(
@@ -133,13 +143,15 @@ async def get_student_owed_amount(student_id: str, academic_year_id: str, db: As
     """
     from app.modules.academic.models import Enrollment
 
+    # Use the enrollment for THIS academic year, so a promoted student is billed
+    # against the class they were in that year (not just their current class).
     enrollment_result = await db.execute(
         select(Enrollment).where(
             Enrollment.student_id == student_id,
-            Enrollment.status == "ACTIVE",
+            Enrollment.academic_year_id == academic_year_id,
         )
     )
-    enrollment = enrollment_result.scalar_one_or_none()
+    enrollment = enrollment_result.scalars().first()
     if not enrollment:
         return Decimal("0")
 
@@ -287,7 +299,7 @@ async def get_defaulters(
         )
         .select_from(StudentProfile)
         .join(User, User.id == StudentProfile.user_id)
-        .join(Enrollment, (Enrollment.student_id == StudentProfile.id) & (Enrollment.status == "ACTIVE"))
+        .join(Enrollment, Enrollment.student_id == StudentProfile.id)
         .join(Section, Section.id == Enrollment.section_id)
         .where(User.deleted_at.is_(None), User.is_active.is_(True))
         .where(Enrollment.academic_year_id == academic_year_id)
@@ -552,7 +564,7 @@ async def get_class_summary(
         students_result = await db.execute(
             select(StudentProfile.id)
             .join(User, User.id == StudentProfile.user_id)
-            .join(Enrollment, (Enrollment.student_id == StudentProfile.id) & (Enrollment.status == "ACTIVE"))
+            .join(Enrollment, (Enrollment.student_id == StudentProfile.id) & (Enrollment.academic_year_id == academic_year_id))
             .where(
                 Enrollment.section_id == row.section_id,
                 User.deleted_at.is_(None),

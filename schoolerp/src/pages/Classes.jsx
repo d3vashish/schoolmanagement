@@ -433,7 +433,7 @@ export default function Classes() {
                               })`
                             }}
                           >
-                            {cls.class_name?.substring(0, 2) || '?'}
+                            {cls.class_name?.split(' ')[0] || '?'}
                           </div>
                           <div>
                             <p className="font-semibold text-[var(--color-text)] leading-tight">Class {cls.class_name}</p>
@@ -582,7 +582,7 @@ export default function Classes() {
                             })`
                           }}
                         >
-                          {cls.name?.substring(0, 2) || '?'}
+                          {cls.name?.split(' ')[0] || '?'}
                         </div>
                         <div>
                           <p className="font-semibold text-[var(--color-text)] leading-tight">Class {cls.name}</p>
