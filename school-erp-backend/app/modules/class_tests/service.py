@@ -11,15 +11,19 @@ async def get_section_roster(section_id: str, db: AsyncSession) -> list[dict]:
     from app.modules.academic.models import Enrollment
     from app.modules.auth.models import StudentProfile, User
 
+    # Roster = students enrolled in this section. We match on the section rather
+    # than status == "ACTIVE" so that students who were promoted out of the
+    # section in a later year still appear on that section's past tests.
     result = await db.execute(
         select(StudentProfile.id, StudentProfile.first_name, StudentProfile.last_name, StudentProfile.admission_number)
         .join(User, User.id == StudentProfile.user_id)
-        .join(Enrollment, and_(Enrollment.student_id == StudentProfile.id, Enrollment.status == "ACTIVE"))
+        .join(Enrollment, Enrollment.student_id == StudentProfile.id)
         .where(
             Enrollment.section_id == section_id,
             User.deleted_at.is_(None),
             User.is_active.is_(True),
         )
+        .distinct()
         .order_by(StudentProfile.first_name)
     )
     return [

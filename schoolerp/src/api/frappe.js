@@ -1966,27 +1966,24 @@ export async function getExams(params = {}) {
   const res = await client.get('/exams', { params });
   let items = Array.isArray(res.data) ? res.data : res.data?.data || res.data?.results || [];
   return items.map(e => ({
-    id: e.id || e.name,
-    exam_name: e.exam_name || '',
-    exam_type: e.exam_type || '',
-    class_name: e.class_name || '',
-    academic_year: e.academic_year || '',
+    id: e.id,
+    name: e.name || '',
+    class_id: e.class_id || null,
+    section_id: e.section_id || null,
+    academic_year_id: e.academic_year_id || null,
+    grading_scheme_id: e.grading_scheme_id || null,
     start_date: e.start_date || '',
     end_date: e.end_date || '',
     status: e.status || 'DRAFT',
-    total_subjects: e.total_subjects || 0,
-    total_students: e.total_students || 0,
-    created_by: e.created_by || '',
-    created_at: e.created_at || '',
   }));
 }
 
 export async function createExam(data) {
   const res = await client.post('/exams', {
-    exam_name: data.exam_name || '',
-    exam_type: data.exam_type || '',
-    class_name: data.class_name || '',
-    academic_year: data.academic_year || '',
+    name: data.name || '',
+    academic_year_id: data.academic_year_id || null,
+    class_id: data.class_id || null,
+    section_id: data.section_id || null,
     start_date: data.start_date || '',
     end_date: data.end_date || '',
   });
@@ -2044,7 +2041,7 @@ export async function getExamResults(examId, subjectId = '') {
 }
 
 export async function bulkSaveExamResults(examId, results) {
-  const res = await client.post(`/exams/${examId}/results/bulk`, { results });
+  const res = await client.post(`/exams/${examId}/results/bulk`, results);
   return res.data;
 }
 
@@ -2091,6 +2088,22 @@ export async function getExamAggregates(examId) {
 
 export async function triggerReportCards(examId) {
   const res = await client.post(`/exams/${examId}/report-cards`);
+  return res.data;
+}
+
+export async function transitionExam(examId, action) {
+  // action: 'submit' | 'approve' | 'publish'
+  const res = await client.post(`/exams/${examId}/${action}`);
+  return res.data;
+}
+
+export async function computeExam(examId) {
+  const res = await client.post(`/exams/${examId}/compute`);
+  return res.data;
+}
+
+export async function getReportCard(examId, studentId) {
+  const res = await client.get(`/exams/${examId}/report-cards/${studentId}`);
   return res.data;
 }
 

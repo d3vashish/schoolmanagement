@@ -1,4 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -145,25 +146,37 @@ async def update_marks(
 @router.post("/{exam_id}/submit", dependencies=teacher_admin)
 async def submit_results(exam_id: str, db: AsyncSession = Depends(get_db)):
     count = await transition_result_status(exam_id, "DRAFT", "SUBMITTED", db)
+    exam = await db.get(Exam, exam_id)
+    if exam:
+        exam.status = "SUBMITTED"
+        await db.flush()
     return {"updated": count, "new_status": "SUBMITTED"}
 
 
 @router.post("/{exam_id}/approve", dependencies=hod_admin)
 async def approve_results(exam_id: str, db: AsyncSession = Depends(get_db)):
     count = await transition_result_status(exam_id, "SUBMITTED", "APPROVED", db)
+    exam = await db.get(Exam, exam_id)
+    if exam:
+        exam.status = "APPROVED"
+        await db.flush()
     return {"updated": count, "new_status": "APPROVED"}
 
 
 @router.post("/{exam_id}/publish", dependencies=hod_admin)
 async def publish_results(exam_id: str, db: AsyncSession = Depends(get_db)):
     count = await transition_result_status(exam_id, "APPROVED", "PUBLISHED", db)
+    exam = await db.get(Exam, exam_id)
+    if exam:
+        exam.status = "PUBLISHED"
+        await db.flush()
     return {"updated": count, "new_status": "PUBLISHED"}
 
 
 @router.get("/{exam_id}/results", response_model=list[ExamResultResponse], dependencies=all_auth)
 async def get_results(exam_id: str, student_id: str | None = None, db: AsyncSession = Depends(get_db)):
     from app.modules.academic.models import Subject
-    from app.modules.students.models import StudentProfile
+    from app.modules.auth.models import StudentProfile
     
     q = (
         select(
@@ -201,9 +214,10 @@ async def get_aggregates(exam_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{exam_id}/compute", dependencies=hod_admin)
 async def compute(exam_id: str):
-    from app.modules.exams.tasks import compute_results
-    compute_results.delay(exam_id)
-    return {"message": "Computation started", "exam_id": exam_id}
+    # Run synchronously (no Celery worker in this deployment).
+    from app.modules.exams.tasks import _compute_results_async
+    result = await _compute_results_async(exam_id)
+    return {"message": "Computation complete", "exam_id": exam_id, **(result or {})}
 
 
 @router.post("/grade-defaults", dependencies=hod_admin)
@@ -217,17 +231,47 @@ async def seed_default_scheme(db: AsyncSession = Depends(get_db)):
     return {"message": "Created", "id": str(scheme.id)}
 
 
-@router.post("/{exam_id}/report-cards", dependencies=hod_admin, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/{exam_id}/report-cards", dependencies=hod_admin)
 async def trigger_report_cards(
     exam_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
+    # Generate report cards synchronously (no Celery worker in this deployment).
+    from datetime import date as _date
+    from app.modules.exams.service import generate_report_card_for_student
+
     exam = await db.get(Exam, exam_id)
     if not exam:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exam not found")
-    background_tasks.add_task(generate_report_cards_task.delay, exam_id)
-    return {"message": "Report card generation queued"}
+
+    student_ids = (await db.execute(
+        select(ExamResult.student_id)
+        .where(ExamResult.exam_id == exam_id, ExamResult.status == "PUBLISHED")
+        .distinct()
+    )).scalars().all()
+
+    if not student_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No published results yet. Publish results first.")
+
+    generated = 0
+    errors = []
+    for sid in student_ids:
+        try:
+            url = await generate_report_card_for_student(exam_id, sid, db)
+            existing = (await db.execute(
+                select(ReportCard).where(ReportCard.exam_id == exam_id, ReportCard.student_id == sid)
+            )).scalar_one_or_none()
+            if existing:
+                existing.file_url = url
+                existing.generated_at = _date.today()
+            else:
+                db.add(ReportCard(exam_id=exam_id, student_id=sid, file_url=url, generated_at=_date.today()))
+            generated += 1
+        except Exception as e:  # noqa: BLE001 - report per-student failures without aborting the batch
+            errors.append(f"{sid}: {e}")
+
+    await db.flush()
+    return {"generated": generated, "errors": errors}
 
 
 @router.get("/{exam_id}/report-cards/{student_id}", response_model=ReportCardResponse, dependencies=all_auth)
@@ -247,3 +291,12 @@ async def get_report_card(
     if not card:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report card not found")
     return card
+
+
+@router.get("/{exam_id}/report-cards/{student_id}/download", dependencies=all_auth)
+async def download_report_card(exam_id: str, student_id: str):
+    from app.modules.exams.service import REPORTCARD_DIR
+    path = REPORTCARD_DIR / str(exam_id) / f"{student_id}.pdf"
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Report card not generated yet")
+    return FileResponse(str(path), media_type="application/pdf", filename=f"report-card-{student_id}.pdf")
