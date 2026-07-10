@@ -2111,3 +2111,7 @@ export async function getReportCard(examId, studentId) {
 export async function submitDoc(doctype, name) {
   return { message: 'Submitted', docname: name };
 }
+export async function backupNow() {
+  const res = await client.post('/admin/backup-now');
+  return res.data;
+}
