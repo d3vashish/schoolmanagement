@@ -43,7 +43,6 @@ const navGroups = [
     { path: '/classes',    label: 'Classes',           icon: 'classes'    },
     { path: '/promotion',  label: 'Promote Students',  icon: 'promotion'  },
     { path: '/subjects',   label: 'Subjects',          icon: 'subjects'   },
-    { path: '/attendance', label: 'Attendance',        icon: 'attendance' },
     { path: '/timetable',  label: 'Timetable',         icon: 'timetable'  },
     { path: '/homework',   label: 'Homework',          icon: 'homework'   },
     { path: '/library',       label: 'Library',           icon: 'library'    },
@@ -54,6 +53,7 @@ const navGroups = [
     { path: '/exam-management', label: 'Exam Management', icon: 'exams'       },
   ]},
   { label: 'HR & Finance', iconColor: '#F59E0B', items: [
+    { path: '/attendance', label: 'Attendance', icon: 'attendance' },
     { path: '/fees',      label: 'Fees',      icon: 'fees'      },
   ]},
   { label: 'Admin', iconColor: '#FBBF24', items: [
@@ -148,7 +148,7 @@ export default function Sidebar() {
           </svg>
         </div>
         <div>
-          <p className="text-base font-bold text-[#1F2A44] leading-none">{school_name || 'SchoolERP'}</p>
+          <p className="text-base font-bold text-[#1F2A44] leading-none">{school_name || 'Orange City Convent'}</p>
           <p className="text-[10px] mt-[3px] text-[#94A3B8] tracking-[0.06em]">School Management</p>
         </div>
       </div>
