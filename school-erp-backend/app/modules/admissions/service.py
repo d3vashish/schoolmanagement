@@ -49,7 +49,8 @@ async def enroll_student(
     admission: Admission,
     section_id: str,
     db: AsyncSession,
-) -> StudentProfile:
+    academic_year_id: str | None = None,
+) -> tuple[StudentProfile, str]:
     section_result = await db.execute(
         select(Section).where(Section.id == section_id).with_for_update()
     )
@@ -57,7 +58,17 @@ async def enroll_student(
     if not section:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Section not found")
 
-    current = await count_enrolled(section_id, str(admission.academic_year_id), db)
+    # Prefer the year explicitly chosen at enroll-time (sent by the frontend's
+    # currently-selected academic year). Fall back to the admission's own
+    # stored academic_year_id only if nothing was passed in.
+    resolved_academic_year_id = academic_year_id or admission.academic_year_id
+    if not resolved_academic_year_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No academic year specified for enrollment",
+        )
+
+    current = await count_enrolled(section_id, str(resolved_academic_year_id), db)
     if current >= section.capacity:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -91,7 +102,7 @@ async def enroll_student(
         student_id=student.id,
         class_id=section.class_id,
         section_id=section_id,
-        academic_year_id=admission.academic_year_id,
+        academic_year_id=resolved_academic_year_id,
         status="ACTIVE",
     )
     db.add(enrollment)

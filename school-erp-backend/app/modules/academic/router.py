@@ -207,10 +207,17 @@ async def create_class(body: ClassCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/sections", response_model=list[SectionResponse])
-async def list_sections(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Section).options(joinedload(Section.class_), joinedload(Section.academic_year))
-    )
+async def list_sections(
+    academic_year_id: Optional[str] = None,
+    class_id: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Section).options(joinedload(Section.class_), joinedload(Section.academic_year))
+    if academic_year_id:
+        query = query.where(Section.academic_year_id == academic_year_id)
+    if class_id:
+        query = query.where(Section.class_id == class_id)
+    result = await db.execute(query)
     sections = result.unique().scalars().all()
     return [
         SectionResponse(

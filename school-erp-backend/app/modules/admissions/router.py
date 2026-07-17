@@ -67,6 +67,32 @@ async def get_admission(admission_id: str, db: AsyncSession = Depends(get_db)):
     await db.refresh(admission)
     return admission
 
+
+@router.delete("/{admission_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=admin_only)
+async def delete_admission(
+    admission_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    admission = await db.get(Admission, admission_id)
+    if not admission:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+
+    result = await db.execute(
+        select(AdmissionDocument).where(AdmissionDocument.admission_id == admission_id)
+    )
+    documents = result.scalars().all()
+    for doc in documents:
+        try:
+            s3_client.delete_object(Bucket=settings.S3_BUCKET, Key=doc.file_key)
+        except Exception:
+            pass
+        await db.delete(doc)
+
+    await db.delete(admission)
+    await db.flush()
+    return None
+
+
 @router.patch("/{admission_id}/status", response_model=AdmissionResponse, dependencies=teacher_admin)
 async def update_status(
     admission_id: str,
@@ -94,6 +120,7 @@ async def enroll(
     request: Request,
     admission_id: str,
     section_id: str,
+    academic_year_id: str | None = None,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -105,7 +132,9 @@ async def enroll(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Admission must be in FEE_PENDING status to enroll",
         )
-    student, temp_password = await enroll_student(admission, section_id, db)
+    student, temp_password = await enroll_student(
+        admission, section_id, db, academic_year_id=academic_year_id
+    )
     return {
         "student_id": str(student.id),
         "admission_number": student.admission_number,
