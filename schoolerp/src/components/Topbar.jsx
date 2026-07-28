@@ -1,15 +1,43 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { getPrimaryRole } from '../config/roleAccess';
 import { useAcademicYear } from '../context/AcademicYearContext';
+import { client } from '../api/frappe';
 
 export default function Topbar() {
   const { user } = useAuth();
   const roleLabel = getPrimaryRole(user?.roles || []);
   const { selectedYear, setSelectedYear, academicYears, currentYear, isCurrentYear, isTeacher } = useAcademicYear();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [showProfile, setShowProfile] = useState(false);
   const [showYearDropdown, setShowYearDropdown] = useState(false);
+  const [showCreateYear, setShowCreateYear] = useState(false);
+  const [yn, setYn] = useState({ name: '', start_date: '', end_date: '' });
+  const [savingYear, setSavingYear] = useState(false);
+  const [yearErr, setYearErr] = useState('');
+
+  const createYear = async (e) => {
+    e.preventDefault();
+    setSavingYear(true); setYearErr('');
+    try {
+      await client.post('/academic/years', {
+        name: yn.name.trim(),
+        start_date: yn.start_date,
+        end_date: yn.end_date,
+        is_active: academicYears.length === 0,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['Academic Year'] });
+      setSelectedYear(yn.name.trim());
+      setShowCreateYear(false); setShowYearDropdown(false);
+      setYn({ name: '', start_date: '', end_date: '' });
+    } catch (err) {
+      setYearErr(err?.response?.data?.detail || 'Could not create academic year');
+    } finally {
+      setSavingYear(false);
+    }
+  };
 
   return (
     <header className="flex items-center justify-between px-6 animate-in-down"
@@ -77,6 +105,57 @@ export default function Topbar() {
                 {academicYears.length === 0 && (
                   <p className="px-3 py-2.5 text-xs text-[#94A3B8]">No academic years found</p>
                 )}
+                <button
+                  onClick={() => { setShowYearDropdown(false); setShowCreateYear(true); }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 mt-1 rounded-xl text-sm font-semibold text-[#2ED05D] hover:bg-[#E8F9ED] transition-all cursor-pointer border-t border-[#E2E8F0]">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                  </svg>
+                  New academic year
+                </button>
+              </div>
+            </>
+          )}
+
+          {showCreateYear && (
+            <>
+              <div className="fixed inset-0 z-[60] bg-black/30" onClick={() => setShowCreateYear(false)} />
+              <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[61] w-[340px] bg-white rounded-2xl shadow-xl border border-[#E2E8F0] p-5">
+                <h3 className="text-base font-bold text-[#1F2A44] mb-1">New academic year</h3>
+                <p className="text-xs text-[#94A3B8] mb-4">Create a year before adding classes, students, or fees.</p>
+                <form onSubmit={createYear} className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-[#475569] mb-1">Name <span className="text-red-500">*</span></label>
+                    <input type="text" required autoFocus value={yn.name}
+                      onChange={e => setYn(v => ({ ...v, name: e.target.value }))}
+                      placeholder="e.g. 2026-2027"
+                      className="w-full px-3 py-2 rounded-xl text-sm border border-[#E2E8F0] outline-none focus:border-[#2ED05D]" />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-[#475569] mb-1">Start <span className="text-red-500">*</span></label>
+                      <input type="date" required value={yn.start_date}
+                        onChange={e => setYn(v => ({ ...v, start_date: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl text-sm border border-[#E2E8F0] outline-none focus:border-[#2ED05D]" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-[#475569] mb-1">End <span className="text-red-500">*</span></label>
+                      <input type="date" required value={yn.end_date}
+                        onChange={e => setYn(v => ({ ...v, end_date: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-xl text-sm border border-[#E2E8F0] outline-none focus:border-[#2ED05D]" />
+                    </div>
+                  </div>
+                  {yearErr && <p className="text-xs text-red-500">{String(yearErr)}</p>}
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button type="button" onClick={() => setShowCreateYear(false)}
+                      className="px-3 py-2 rounded-xl text-sm text-[#475569] hover:bg-[#F1F5F9] cursor-pointer">Cancel</button>
+                    <button type="submit" disabled={savingYear}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#2ED05D] hover:bg-[#22C55E] disabled:opacity-50 cursor-pointer flex items-center gap-2">
+                      {savingYear && <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                      Create
+                    </button>
+                  </div>
+                </form>
               </div>
             </>
           )}

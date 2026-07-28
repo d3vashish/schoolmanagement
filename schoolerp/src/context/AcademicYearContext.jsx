@@ -13,7 +13,7 @@ export function AcademicYearProvider({ children }) {
 
   const { data: academicYears = [] } = useQuery({
     queryKey: ['Academic Year'],
-    queryFn: () => getList('Academic Year', [], ['name', 'academic_year_name', 'year_start_date', 'year_end_date'], 50),
+    queryFn: () => getList('Academic Year', [], ['id', 'name', 'academic_year_name', 'year_start_date', 'year_end_date'], 50),
     staleTime: 10 * 60 * 1000,
   });
 
@@ -58,7 +58,8 @@ export function AcademicYearProvider({ children }) {
   const yearGroupNames = useMemo(() => yearGroups.map(g => g.name), [yearGroups]);
 
   const value = {
-    selectedYear, setSelectedYear, academicYears, currentYear, isCurrentYear,
+    selectedYear, selectedYearId: selectedYearData?.id || null,
+    setSelectedYear, academicYears, currentYear, isCurrentYear,
     yearStartDate, yearEndDate, isTeacher, loading: settings?.loading,
     yearGroups, yearPrograms, yearGroupNames,
   };

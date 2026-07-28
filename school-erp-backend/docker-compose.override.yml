@@ -1,0 +1,6 @@
+# Temporary override for QA: native PostgreSQL 18 owns host port 5432,
+# so publish the containerized DB on 5433 instead. Delete to revert.
+services:
+  db:
+    ports:
+      - "5433:5432"

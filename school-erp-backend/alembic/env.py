@@ -21,6 +21,7 @@ import app.modules.library.models  # noqa: F401
 import app.modules.staff.models  # noqa: F401
 import app.modules.parent.models  # noqa: F401
 import app.modules.homework.models  # noqa: F401
+import app.modules.admin.models  # noqa: F401  (SchoolSetting — must be registered or autogenerate drops school_settings)
 # Additional module imports will be added as they are created
 
 config = context.config

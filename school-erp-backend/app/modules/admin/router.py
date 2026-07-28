@@ -27,7 +27,10 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 async def _get_current_super_admin(
-    current_user: dict = role_required("super_admin"),
+    # principal is treated as an Administrator across the app (role label,
+    # frontend roleConfig = '*', RoleGuard allows /admin), so admin endpoints
+    # accept principal too — otherwise the Admin UI renders but every data call 403s.
+    current_user: dict = role_required("super_admin", "principal"),
 ) -> dict:
     return current_user
 

@@ -13,7 +13,7 @@ import EnrollStudentModal from '../components/fees/EnrollStudentModal';
 export default function Students() {
   const { user } = useAuth();
   const settings = useSettings();
-  const { selectedYear, isCurrentYear, yearGroups, yearPrograms } = useAcademicYear();
+  const { selectedYear, selectedYearId, isCurrentYear, yearGroups, yearPrograms } = useAcademicYear();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -217,7 +217,7 @@ export default function Students() {
       class_id: selectedStandard.id || selectedStandard.name,
       name: name,
       capacity: 40,
-      academic_year_id: selectedYear || settings?.academic_year || '00000000-0000-0000-0000-000000000000',
+      academic_year_id: selectedYearId || '00000000-0000-0000-0000-000000000000',
       class_teacher_id: newSectionTeacherId || null,
     }),
     onSuccess: () => {
