@@ -20,12 +20,12 @@ jobs:
               cd ~/schoolmanagement
               git pull origin main
             
-              cd school-erp-backend
+              cd schoolerp
+              npm install
+              npm run build
+
+              cd ../school-erp-backend
               source venv/bin/activate
               pip install -r requirements.txt
             
               sudo systemctl restart school-backend
-            
-              cd ~/schoolmanagement/schoolerp
-              npm install
-              npm run build

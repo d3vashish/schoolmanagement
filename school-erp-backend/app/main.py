@@ -1,5 +1,9 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -56,3 +60,16 @@ app.include_router(notifications_router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+# ── Serve built frontend (SPA) — must be last so API routes take priority ──
+_DIST = Path(__file__).resolve().parent.parent.parent / "schoolerp" / "dist"
+if _DIST.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_DIST / "assets")), name="static-assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        file = _DIST / full_path
+        if file.is_file():
+            return FileResponse(str(file))
+        return FileResponse(str(_DIST / "index.html"))
