@@ -14,6 +14,7 @@ from app.shared.storage import upload_file
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "templates"
 env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+REPORTCARD_DIR = Path(__file__).resolve().parent.parent.parent / "static" / "report-cards"
 
 
 def get_grade(percentage: float, scheme: GradingScheme | None) -> str | None:
@@ -76,9 +77,10 @@ async def generate_report_card_for_student(
     if not student:
         raise ValueError("Student not found")
 
+    # A student's class comes from the exam (StudentProfile has no class_id).
     class_ = None
-    if student.class_id:
-        class_ = await db.get(Class, student.class_id)
+    if exam.class_id:
+        class_ = await db.get(Class, exam.class_id)
 
     aggregate = (
         await db.execute(
@@ -114,28 +116,49 @@ async def generate_report_card_for_student(
             "rank": aggregate.rank,
         }
 
-    from weasyprint import HTML
+    # Build the PDF with fpdf2 (pure-Python; no system libraries required).
+    from fpdf import FPDF
 
-    template = env.get_template("report_card.html")
-    html = template.render(
-        student_name=f"{student.first_name} {student.last_name}",
-        admission_number=student.admission_number,
-        class_name=class_.name if class_ else "",
-        exam_name=exam.name,
-        results=result_rows,
-        aggregate=agg,
-    )
+    def _s(v):
+        return "" if v is None else str(v)
 
-    pdf_bytes = HTML(string=html).write_pdf()
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Report Card", ln=1, align="C")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 11)
+    pdf.cell(0, 8, f"Name: {student.first_name or ''} {student.last_name or ''}".strip(), ln=1)
+    if getattr(student, "admission_number", None):
+        pdf.cell(0, 8, f"Admission No: {student.admission_number}", ln=1)
+    pdf.cell(0, 8, f"Class: {class_.name if class_ else ''}", ln=1)
+    pdf.cell(0, 8, f"Exam: {exam.name}", ln=1)
+    pdf.ln(4)
 
-    object_key = f"report-cards/{exam_id}/{student_id}.pdf"
-    with NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp_path = tmp.name
-        tmp.write(pdf_bytes)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(85, 8, "Subject", border=1)
+    pdf.cell(30, 8, "Marks", border=1, align="C")
+    pdf.cell(30, 8, "Max", border=1, align="C")
+    pdf.cell(35, 8, "Grade", border=1, align="C", ln=1)
+    pdf.set_font("Helvetica", "", 11)
+    for row in result_rows:
+        marks = "Absent" if row.get("is_absent") else (_s(row.get("marks")) if row.get("marks") is not None else "-")
+        pdf.cell(85, 8, _s(row.get("subject_name")), border=1)
+        pdf.cell(30, 8, marks, border=1, align="C")
+        pdf.cell(30, 8, _s(row.get("max_marks")), border=1, align="C")
+        pdf.cell(35, 8, _s(row.get("grade") or "-"), border=1, align="C", ln=1)
+    pdf.ln(5)
 
-    try:
-        url = await upload_file(tmp_path, object_key)
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
+    if agg:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 8, f"Total: {_s(agg.get('total_marks'))}/{_s(agg.get('max_total'))}", ln=1)
+        pct = agg.get("percentage")
+        pdf.cell(0, 8, f"Percentage: {pct:.1f}%" if isinstance(pct, (int, float)) else "Percentage: -", ln=1)
+        pdf.cell(0, 8, f"Grade: {_s(agg.get('grade') or '-')}    Rank: {_s(agg.get('rank') or '-')}", ln=1)
 
-    return url
+    out_dir = REPORTCARD_DIR / str(exam_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{student_id}.pdf"
+    pdf.output(str(out_path))
+
+    return f"/exams/{exam_id}/report-cards/{student_id}/download"

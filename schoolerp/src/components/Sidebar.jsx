@@ -1,13 +1,14 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useSettings } from '../context/SettingsContext';
-import { getAllowedPages, getPrimaryRole } from '../config/roleAccess';
+import { getAllowedPages } from '../config/roleAccess';
 import { useState } from 'react';
 
 const icons = {
   dashboard:    'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
   settings:     'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z',
   classes:      'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10',
+  promotion:    'M5 10l7-7m0 0l7 7m-7-7v18',
   subjects:     'M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253',
   students:     'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z',
   employees:    'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
@@ -40,32 +41,20 @@ const navGroups = [
   { label: 'Academic', iconColor: '#FB923C', items: [
     { path: '/students',   label: 'Students',          icon: 'students'   },
     { path: '/classes',    label: 'Classes',           icon: 'classes'    },
+    { path: '/promotion',  label: 'Promote Students',  icon: 'promotion'  },
     { path: '/subjects',   label: 'Subjects',          icon: 'subjects'   },
-    { path: '/attendance', label: 'Attendance',        icon: 'attendance' },
     { path: '/timetable',  label: 'Timetable',         icon: 'timetable'  },
     { path: '/homework',   label: 'Homework',          icon: 'homework'   },
-    { path: '/behaviour',  label: 'Behaviour',         icon: 'behaviour'  },
     { path: '/library',       label: 'Library',           icon: 'library'    },
     { path: '/admissions',    label: 'Admissions',        icon: 'students'   },
   ]},
   { label: 'Examinations', iconColor: '#F97316', items: [
-    { path: '/exams',        label: 'Exams',        icon: 'exams'        },
     { path: '/class-tests',  label: 'Class Tests',  icon: 'classtests'   },
-    { path: '/certificates', label: 'Certificates', icon: 'certificates' },
-    { path: '/reports',         label: 'Reports',       icon: 'reports'      },
     { path: '/exam-management', label: 'Exam Management', icon: 'exams'       },
   ]},
   { label: 'HR & Finance', iconColor: '#F59E0B', items: [
-    { path: '/employees', label: 'Employees', icon: 'employees' },
-    { path: '/salary',    label: 'Salary',    icon: 'salary'    },
-    { path: '/accounts',  label: 'Accounts',  icon: 'accounts'  },
+    { path: '/attendance', label: 'Attendance', icon: 'attendance' },
     { path: '/fees',      label: 'Fees',      icon: 'fees'      },
-  ]},
-  { label: 'Communication', iconColor: '#FD8A5E', items: [
-    { path: '/live-class', label: 'Live Class',    icon: 'liveclass' },
-    { path: '/messaging',  label: 'Messaging',     icon: 'messaging' },
-    { path: '/notifications', label: 'Notifications', icon: 'sms'       },
-    { path: '/store',      label: 'Store & POS',   icon: 'store'     },
   ]},
   { label: 'Admin', iconColor: '#FBBF24', items: [
     { path: '/admin',    label: 'Dashboard',  icon: 'dashboard' },
@@ -134,7 +123,7 @@ function GroupSection({ group, defaultOpen = true, styleDelay }) {
 }
 
 export default function Sidebar() {
-  const { logout, user } = useAuth();
+  const { user } = useAuth();
   const { school_name } = useSettings();
 
   const roles = user?.roles || [];
@@ -148,8 +137,6 @@ export default function Sidebar() {
     }))
     .filter(group => group.items.length > 0);
 
-  const roleLabel = getPrimaryRole(roles);
-
   return (
     <aside className="fixed left-0 top-0 h-screen flex flex-col z-10 overflow-hidden"
       style={{ background: '#F7F9FC', width: '250px' }}>
@@ -161,7 +148,7 @@ export default function Sidebar() {
           </svg>
         </div>
         <div>
-          <p className="text-base font-bold text-[#1F2A44] leading-none">{school_name || 'SchoolERP'}</p>
+          <p className="text-base font-bold text-[#1F2A44] leading-none">{school_name || 'Orange City Convent'}</p>
           <p className="text-[10px] mt-[3px] text-[#94A3B8] tracking-[0.06em]">School Management</p>
         </div>
       </div>
@@ -175,26 +162,6 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      <div className="flex-shrink-0 border-t border-[#E8ECF1] animate-in" style={{ animationDelay: '280ms' }}>
-        {user && (
-          <div className="mx-2 my-2 px-3 py-[9px] rounded-[999px] bg-[#E8F9ED] transition-[background-color] duration-200 hover:bg-[#D1FAE5]">
-            <p className="text-[10px] text-[#94A3B8] mb-[1px] tracking-wide">Signed in as</p>
-            <p className="text-xs font-semibold text-[#1F2A44] truncate">{user.full_name || user.usr}</p>
-            <p className="text-[10px] mt-[2px] font-medium text-[#475569]">{roleLabel}</p>
-          </div>
-        )}
-        <div className="px-2 pb-3">
-          <button onClick={logout}
-            className="flex items-center gap-3 px-3 py-[9px] rounded-[999px] w-full text-sm font-medium text-[#475569] hover:bg-[#E8F9ED] hover:text-[#2ED05D] transition-[color,background-color,transform] duration-200 cursor-pointer active:scale-[0.96] group">
-            <span className="w-5 h-5 flex items-center justify-center transition-[color,transform] duration-300 group-hover:-translate-y-[1px]">
-              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </span>
-            <span>Sign out</span>
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }

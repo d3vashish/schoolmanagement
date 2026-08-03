@@ -1,23 +1,14 @@
 import { useState } from 'react';
 import { adminCreateUser } from '../api/frappe';
 
-const commonPasswords = ['password', '123456', '12345678', 'qwerty', 'admin', 'letmein', 'welcome', 'monkey', 'dragon', 'master', 'login', 'abc123', 'passw0rd'];
-
-const getPasswordError = (pw) => {
-  if (pw.length < 6) return 'Password must be at least 6 characters';
-  if (commonPasswords.includes(pw.toLowerCase())) return 'This password is too common. Choose a stronger one.';
-  if (pw === pw.toLowerCase()) return 'Add at least one uppercase letter for a stronger password.';
-  if (pw === pw.toUpperCase()) return 'Add at least one lowercase letter for a stronger password.';
-  if (!/\d/.test(pw)) return 'Add at least one number for a stronger password.';
-  if (!/[^a-zA-Z0-9]/.test(pw)) return 'Add at least one special character for a stronger password.';
-  return null;
-};
 
 const ROLE_OPTIONS = [
   { value: 'teacher', label: 'Teacher' },
   { value: 'principal', label: 'Principal' },
   { value: 'accountant', label: 'Accountant' },
   { value: 'librarian', label: 'Librarian' },
+  { value: 'student', label: 'Student' },
+  { value: 'parent', label: 'Parent' },
 ];
 
 export default function UserModal({ show, onClose, onSuccess }) {
@@ -52,12 +43,6 @@ export default function UserModal({ show, onClose, onSuccess }) {
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
-      return;
-    }
-
-    const pwError = getPasswordError(formData.password);
-    if (pwError) {
-      setError(pwError);
       return;
     }
 

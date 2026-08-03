@@ -44,7 +44,7 @@ class Subject(Base, TimestampMixin):
     __tablename__ = "academic_subjects"
 
     name = Column(String(100), nullable=False)
-    code = Column(String(20), unique=True, nullable=False)
+    code = Column(String(20), unique=True, nullable=True)
     is_graded = Column(Boolean, default=True, nullable=False)
     department = Column(String(100), nullable=True)
     description = Column(Text, nullable=True)

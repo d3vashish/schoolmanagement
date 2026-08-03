@@ -99,6 +99,14 @@ export const logout = async () => {
   clearTokens();
 };
 
+export const changePassword = async (currentPassword, newPassword) => {
+  const res = await client.post('/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  return res.data;
+};
+
 export const getLoggedUser = async () => {
   const res = await client.get('/auth/me');
   return res.data.email;
@@ -1226,6 +1234,8 @@ export async function callMethod(method, args = {}) {
 
 // ─── Staff / HR API ───────────────────────────────────────────────────────────
 
+const STAFF_ROLES = ['teacher', 'accountant', 'librarian', 'principal', 'super_admin'];
+
 export async function getStaffList() {
   const [usersRes, instructorsRes] = await Promise.allSettled([
     client.get('/auth/users'),
@@ -1235,6 +1245,9 @@ export async function getStaffList() {
   const users = usersRes.status === 'fulfilled'
     ? (Array.isArray(usersRes.value.data) ? usersRes.value.data : usersRes.value.data?.data || usersRes.value.data?.results || [])
     : [];
+
+  // Only keep staff-role accounts — excludes student, parent, etc.
+  const staffUsers = users.filter(u => STAFF_ROLES.includes((u.role || '').toLowerCase()));
 
   const instructors = instructorsRes.status === 'fulfilled'
     ? (Array.isArray(instructorsRes.value.data) ? instructorsRes.value.data : instructorsRes.value.data?.data || instructorsRes.value.data?.results || [])
@@ -1249,7 +1262,7 @@ export async function getStaffList() {
   const combined = [];
   const seen = new Set();
 
-  users.forEach(u => {
+  staffUsers.forEach(u => {
     const key = u.email || u.id || u.name;
     if (!key || seen.has(key)) return;
     seen.add(key);
@@ -1261,15 +1274,17 @@ export async function getStaffList() {
       last_name: inst.last_name || u.last_name || '',
       full_name: `${inst.first_name || u.first_name || ''} ${inst.last_name || u.last_name || ''}`.trim() || u.email || key,
       role: u.role || 'teacher',
-      department: inst.department || '',
-      qualification: inst.qualification || '',
-      employee_id: inst.employee_id || '',
+      department: inst.department || u.department || '',
+      qualification: inst.qualification || u.qualification || '',
+      employee_id: inst.employee_id || u.employee_id || '',
       is_active: u.is_active ?? inst.is_active ?? true,
       phone: u.phone || inst.phone || '',
       user_id: inst.user_id || u.user_id || '',
     });
   });
 
+  // Instructors are staff by definition — no role filter needed here,
+  // but skip anyone already added above to avoid duplicates
   instructors.forEach(i => {
     const key = i.user_id || i.email || i.id;
     if (!key || seen.has(key)) return;
@@ -1694,11 +1709,7 @@ const ADMISSION_TRANSITIONS = {
   INQUIRY: ['APPLICATION_SUBMITTED'],
   APPLICATION_SUBMITTED: ['DOCUMENTS_PENDING'],
   DOCUMENTS_PENDING: ['DOCUMENTS_VERIFIED'],
-  DOCUMENTS_VERIFIED: ['TEST_SCHEDULED'],
-  TEST_SCHEDULED: ['TEST_COMPLETED'],
-  TEST_COMPLETED: ['INTERVIEW_SCHEDULED'],
-  INTERVIEW_SCHEDULED: ['INTERVIEW_COMPLETED'],
-  INTERVIEW_COMPLETED: ['FEE_PENDING'],
+  DOCUMENTS_VERIFIED: ['FEE_PENDING'],
   FEE_PENDING: ['ENROLLED'],
   ENROLLED: [],
 };
@@ -1708,7 +1719,7 @@ export function getAllowedTransitions(status) {
 }
 
 export async function getAdmissions(params = {}) {
-  const res = await client.get('/admissions', { params });
+  const res = await client.get('/admissions/', { params });
   let items = Array.isArray(res.data) ? res.data : res.data?.data || res.data?.results || [];
   return items.map(a => ({
     id: a.id || a.name,
@@ -1732,19 +1743,39 @@ export async function getAdmissions(params = {}) {
 }
 
 export async function createAdmission(data) {
-  const res = await client.post('/admissions', {
+  const res = await client.post('/admissions/', {
     applicant_name: data.applicant_name || '',
-    date_of_birth: data.date_of_birth || '',
-    gender: data.gender || '',
-    phone: data.phone || '',
-    email: data.email || '',
-    address: data.address || '',
-    class_applied: data.class_applied || '',
-    academic_year: data.academic_year || '',
-    previous_school: data.previous_school || '',
-    parent_name: data.parent_name || '',
-    parent_phone: data.parent_phone || '',
-    parent_email: data.parent_email || '',
+    applicant_phone: data.phone || data.applicant_phone || '',
+    applicant_email: data.applicant_email || '',
+    date_of_birth: data.date_of_birth || null,
+    gender: data.gender || null,
+    phone: data.phone || null,
+    address: data.address || null,
+    aadhar_number: data.aadhar_number || null,
+    category: data.category || null,
+    caste: data.caste || null,
+    religion: data.religion || null,
+    nationality: data.nationality || null,
+    blood_group: data.blood_group || null,
+    class_id: data.class_id || '',
+    academic_year_id: data.academic_year_id || '',
+    previous_school: data.previous_school || null,
+    previous_class: data.previous_class || null,
+    tc_number: data.tc_number || null,
+    father_name: data.father_name || null,
+    father_phone: data.father_phone || null,
+    father_email: data.father_email || null,
+    father_occupation: data.father_occupation || null,
+    father_aadhar: data.father_aadhar || null,
+    mother_name: data.mother_name || null,
+    mother_phone: data.mother_phone || null,
+    mother_email: data.mother_email || null,
+    mother_occupation: data.mother_occupation || null,
+    mother_aadhar: data.mother_aadhar || null,
+    parent_name: data.parent_name || null,
+    parent_phone: data.parent_phone || null,
+    parent_email: data.parent_email || null,
+    remarks: data.remarks || null,
   });
   return { id: res.data.id || res.data.name, ...res.data };
 }
@@ -1943,27 +1974,24 @@ export async function getExams(params = {}) {
   const res = await client.get('/exams', { params });
   let items = Array.isArray(res.data) ? res.data : res.data?.data || res.data?.results || [];
   return items.map(e => ({
-    id: e.id || e.name,
-    exam_name: e.exam_name || '',
-    exam_type: e.exam_type || '',
-    class_name: e.class_name || '',
-    academic_year: e.academic_year || '',
+    id: e.id,
+    name: e.name || '',
+    class_id: e.class_id || null,
+    section_id: e.section_id || null,
+    academic_year_id: e.academic_year_id || null,
+    grading_scheme_id: e.grading_scheme_id || null,
     start_date: e.start_date || '',
     end_date: e.end_date || '',
     status: e.status || 'DRAFT',
-    total_subjects: e.total_subjects || 0,
-    total_students: e.total_students || 0,
-    created_by: e.created_by || '',
-    created_at: e.created_at || '',
   }));
 }
 
 export async function createExam(data) {
   const res = await client.post('/exams', {
-    exam_name: data.exam_name || '',
-    exam_type: data.exam_type || '',
-    class_name: data.class_name || '',
-    academic_year: data.academic_year || '',
+    name: data.name || '',
+    academic_year_id: data.academic_year_id || null,
+    class_id: data.class_id || null,
+    section_id: data.section_id || null,
     start_date: data.start_date || '',
     end_date: data.end_date || '',
   });
@@ -2021,7 +2049,7 @@ export async function getExamResults(examId, subjectId = '') {
 }
 
 export async function bulkSaveExamResults(examId, results) {
-  const res = await client.post(`/exams/${examId}/results/bulk`, { results });
+  const res = await client.post(`/exams/${examId}/results/bulk`, results);
   return res.data;
 }
 
@@ -2071,7 +2099,27 @@ export async function triggerReportCards(examId) {
   return res.data;
 }
 
+export async function transitionExam(examId, action) {
+  // action: 'submit' | 'approve' | 'publish'
+  const res = await client.post(`/exams/${examId}/${action}`);
+  return res.data;
+}
+
+export async function computeExam(examId) {
+  const res = await client.post(`/exams/${examId}/compute`);
+  return res.data;
+}
+
+export async function getReportCard(examId, studentId) {
+  const res = await client.get(`/exams/${examId}/report-cards/${studentId}`);
+  return res.data;
+}
+
 // ─── submitDoc ────────────────────────────────────────────────────────────────
 export async function submitDoc(doctype, name) {
   return { message: 'Submitted', docname: name };
+}
+export async function backupNow() {
+  const res = await client.post('/admin/backup-now');
+  return res.data;
 }

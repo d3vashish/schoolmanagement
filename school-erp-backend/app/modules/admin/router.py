@@ -283,6 +283,8 @@ async def update_settings(
             db.add(setting)
         results.append(setting)
     await db.flush()
+    for s in results:
+        await db.refresh(s)
     return [SettingResponse(key=s.key, value=s.value, updated_at=s.updated_at) for s in results]
 
 
@@ -323,3 +325,137 @@ async def get_audit_log(
             created_at=log.created_at,
         ))
     return PaginatedResponse(data=[d.model_dump() for d in data], total=total, page=page, page_size=page_size)
+
+@router.post("/backup-now")
+async def backup_now(
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(_get_current_super_admin),
+):
+    """On-demand backup. Writes a restorable SQL dump AND a readable Excel workbook
+    (one sheet per table), saving both to local app data and uploading to the cloud."""
+    import os
+    import asyncio
+    import subprocess
+    import datetime as _dt
+    import uuid as _uuid
+    from decimal import Decimal
+    from pathlib import Path
+    from sqlalchemy import text
+
+    container = os.getenv("DB_CONTAINER", "school-erp-backend-db-1")
+    db_user = os.getenv("DB_USER_BACKUP", "erp_user")
+    db_name = os.getenv("DB_NAME_BACKUP", "school_erp")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+    base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+    local_dir = Path(base) / "OCC-Backups"
+    local_dir.mkdir(parents=True, exist_ok=True)
+
+    sql_name = f"school_erp_{stamp}.sql"
+    xlsx_name = f"school_erp_{stamp}.xlsx"
+    sql_path = local_dir / sql_name
+    xlsx_path = local_dir / xlsx_name
+
+    # ---------- 1) SQL dump (restorable) ----------
+    def _dump():
+        with open(sql_path, "wb") as f:
+            proc = subprocess.run(
+                ["docker", "exec", container, "pg_dump", "-U", db_user, db_name],
+                stdout=f, stderr=subprocess.PIPE,
+            )
+        return proc.returncode, proc.stderr.decode(errors="ignore")
+
+    sql_ok = False
+    try:
+        rc, err = await asyncio.to_thread(_dump)
+        sql_ok = (rc == 0 and sql_path.exists() and sql_path.stat().st_size > 0)
+    except FileNotFoundError:
+        err = "docker not found on server PATH"
+
+    # ---------- 2) Excel workbook (readable) ----------
+    tables = (await db.execute(text(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+    ))).scalars().all()
+
+    table_data = {}
+    for tbl in tables:
+        res = await db.execute(text(f'SELECT * FROM "{tbl}"'))
+        cols = list(res.keys())
+        rows = res.fetchall()
+        table_data[tbl] = (cols, [list(r) for r in rows])
+
+    def _cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, (_dt.datetime, _dt.date)):
+            return v.isoformat()
+        if isinstance(v, _uuid.UUID):
+            return str(v)
+        if isinstance(v, Decimal):
+            return float(v)
+        if isinstance(v, (bytes, bytearray)):
+            return "<binary>"
+        return v
+
+    def _build_xlsx():
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill
+        wb = Workbook()
+        wb.remove(wb.active)
+        used = set()
+        for tbl, (cols, rows) in table_data.items():
+            name = tbl[:31] or "sheet"
+            base_name = name
+            i = 1
+            while name in used:
+                suffix = f"_{i}"
+                name = base_name[:31 - len(suffix)] + suffix
+                i += 1
+            used.add(name)
+            ws = wb.create_sheet(title=name)
+            ws.append(cols)
+            for c in ws[1]:
+                c.font = Font(bold=True, color="FFFFFF")
+                c.fill = PatternFill("solid", fgColor="15803D")
+            for row in rows:
+                ws.append([_cell(v) for v in row])
+        if not wb.sheetnames:
+            wb.create_sheet(title="empty")
+        wb.save(str(xlsx_path))
+
+    xlsx_ok = False
+    xlsx_err = None
+    try:
+        await asyncio.to_thread(_build_xlsx)
+        xlsx_ok = xlsx_path.exists() and xlsx_path.stat().st_size > 0
+    except ModuleNotFoundError:
+        xlsx_err = "openpyxl not installed on the server (run: pip install openpyxl)"
+    except Exception as e:  # noqa: BLE001
+        xlsx_err = str(e)[:200]
+
+    if not sql_ok and not xlsx_ok:
+        raise HTTPException(status_code=500, detail=f"Backup failed. SQL: {err[:200] if 'err' in dir() else 'n/a'}. Excel: {xlsx_err}")
+
+    # ---------- 3) Upload both to cloud (best-effort) ----------
+    cloud_msgs = []
+    try:
+        from app.shared.storage import upload_file
+        if sql_ok:
+            await upload_file(str(sql_path), f"backups/{sql_name}")
+            cloud_msgs.append("SQL")
+        if xlsx_ok:
+            await upload_file(str(xlsx_path), f"backups/{xlsx_name}")
+            cloud_msgs.append("Excel")
+        cloud = ("uploaded to cloud: " + ", ".join(cloud_msgs)) if cloud_msgs else "nothing uploaded"
+    except Exception as e:  # noqa: BLE001
+        cloud = f"local only (cloud upload failed: {str(e)[:150]})"
+
+    return {
+        "message": "Backup complete",
+        "sql_file": sql_name if sql_ok else None,
+        "excel_file": xlsx_name if xlsx_ok else None,
+        "excel_error": xlsx_err,
+        "local_dir": str(local_dir),
+        "cloud": cloud,
+        "tables": len(table_data),
+    }

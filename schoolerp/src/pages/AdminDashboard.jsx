@@ -1,4 +1,5 @@
-import { adminGetDashboard } from '../api/frappe';
+import { adminGetDashboard, backupNow } from '../api/frappe';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
 const CARD_GRADIENTS = [
@@ -34,6 +35,24 @@ export default function AdminDashboard() {
     queryFn: adminGetDashboard,
   });
 
+  const [backing, setBacking] = useState(false);
+  const [backupMsg, setBackupMsg] = useState('');
+  const handleBackup = async () => {
+    setBacking(true); setBackupMsg('');
+    try {
+      const res = await backupNow();
+      const parts = [];
+      if (res.excel_file) parts.push('Excel');
+      if (res.sql_file) parts.push('SQL');
+      const made = parts.length ? parts.join(' + ') : 'files';
+      let msg = `✓ Backup complete — ${made} for ${res.tables} tables saved to local app data. ${res.cloud || ''}`;
+      if (res.excel_error) msg += `  (Excel note: ${res.excel_error})`;
+      setBackupMsg(msg);
+    } catch (e) {
+      setBackupMsg(`✗ ${e?.response?.data?.detail || 'Backup failed'}`);
+    } finally { setBacking(false); }
+  };
+
   const kpis = [
     { label: 'Total Users', value: data?.total_users ?? '—', gradient: CARD_GRADIENTS[0] },
     { label: 'Active Today', value: data?.active_today ?? '—', gradient: CARD_GRADIENTS[1] },
@@ -43,11 +62,20 @@ export default function AdminDashboard() {
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-16">
-      <div>
-        <div className="eyebrow">Administration</div>
-        <h1 className="text-[2rem] sm:text-[2.5rem] font-extrabold text-[#2D2A24] tracking-tight leading-[1.1] -mt-1">Admin Dashboard</h1>
-        <p className="text-[#8A8680] mt-2 font-medium text-sm">System overview for super admins</p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <div className="eyebrow">Administration</div>
+          <h1 className="text-[2rem] sm:text-[2.5rem] font-extrabold text-[#2D2A24] tracking-tight leading-[1.1] -mt-1">Admin Dashboard</h1>
+          <p className="text-[#8A8680] mt-2 font-medium text-sm">System overview for super admins</p>
+        </div>
+        <button onClick={handleBackup} disabled={backing}
+          className={`px-4 py-2.5 rounded-xl text-sm font-bold text-white transition-colors ${backing ? 'bg-gray-400 cursor-wait' : 'bg-[#2ED05D] hover:bg-[#25B04E]'}`}>
+          {backing ? 'Backing up…' : '⬇ Backup Now'}
+        </button>
       </div>
+      {backupMsg && (
+        <div className={`px-4 py-3 rounded-xl text-sm font-semibold ${backupMsg.startsWith('✓') ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>{backupMsg}</div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

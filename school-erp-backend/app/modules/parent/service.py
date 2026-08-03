@@ -10,8 +10,7 @@ from app.modules.academic.models import Class
 from app.modules.attendance.models import Attendance, LeaveApplication
 from app.modules.auth.models import StudentProfile, User
 from app.modules.exams.models import Exam, ExamAggregate, ExamResult
-from app.modules.fees.models import Invoice
-from app.modules.fees.utils import calculate_late_fee
+from app.modules.fees.service import get_current_academic_year, get_student_fee_summary
 from app.modules.parent.models import (
     Circular,
     ParentStudentLink,
@@ -64,27 +63,27 @@ async def get_child_attendance(
 
 
 async def get_fee_dues(student_id: str, db: AsyncSession) -> list[dict]:
-    result = await db.execute(
-        select(Invoice)
-        .where(
-            Invoice.student_id == student_id,
-            Invoice.status.in_(["PENDING", "OVERDUE"]),
-        )
-        .order_by(Invoice.due_date)
-    )
-    invoices = result.scalars().all()
+    """
+    Returns the student's current fee summary as a single-item list, kept
+    as a list for backward compatibility with whatever frontend code expects
+    to iterate over "dues". There's only ever one entry now since fees are
+    a combined owed/paid/remaining total per academic year, not a list of
+    separate installment invoices.
+    """
+    year = await get_current_academic_year(db)
+    if not year:
+        return []
+    summary = await get_student_fee_summary(student_id, str(year.id), db)
+    if summary["remaining"] <= 0:
+        return []
     return [
         {
-            "invoice_id": inv.id,
-            "installment_name": inv.installment.name if inv.installment else "",
-            "gross_amount": inv.gross_amount,
-            "discount_amount": inv.discount_amount,
-            "net_amount": inv.net_amount,
-            "due_date": inv.due_date,
-            "status": inv.status,
-            "late_fee": calculate_late_fee(inv),
+            "academic_year_id": summary["academic_year_id"],
+            "owed": summary["owed"],
+            "paid": summary["paid"],
+            "remaining": summary["remaining"],
+            "status": summary["status"],
         }
-        for inv in invoices
     ]
 
 

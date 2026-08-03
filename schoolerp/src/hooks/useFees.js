@@ -429,11 +429,13 @@ export function useStudentLedger(studentId, options = {}) {
   });
 }
 
-export function useLedgerSummary(studentId, options = {}) {
+export function useLedgerSummary(studentId, academicYearId, options = {}) {
   return useQuery({
-    queryKey: ['Fees', 'ledger-summary', studentId],
+    queryKey: ['Fees', 'ledger-summary', studentId, academicYearId],
     queryFn: async () => {
-      const res = await client.get(`/fees/ledger/${studentId}/summary`);
+      const res = await client.get(`/fees/ledger/${studentId}/summary`, {
+        params: academicYearId ? { academic_year_id: academicYearId } : undefined,
+      });
       return res.data;
     },
     enabled: !!studentId,
@@ -445,26 +447,46 @@ export function useRecordPayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data) => {
-      const res = await client.post('/fees/payments', data);
-      return res.data;
+      // data: { student_id, academic_year_id, amount, mode, reference_no, notes }
+      const res = await client.post('/fees/receipts', data);
+      return res.data; // FeeReceiptResponse — includes receipt_number
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ['Fees'] });
-      qc.invalidateQueries({ queryKey: ['Fees', 'ledger'] });
-      qc.invalidateQueries({ queryKey: ['Fees', 'invoice'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger', vars.student_id] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger-summary', vars.student_id] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'receipts', vars.student_id] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'class-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'defaulters'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'collections'] });
     },
   });
 }
 
-export function usePaymentsList(invoiceId, options = {}) {
+export function useReceipts(studentId, academicYearId, options = {}) {
   return useQuery({
-    queryKey: ['Fees', 'payments', invoiceId],
+    queryKey: ['Fees', 'receipts', studentId, academicYearId],
     queryFn: async () => {
-      const res = await client.get('/fees/payments', {
-        params: invoiceId ? { invoice_id: invoiceId } : {},
-      });
+      const params = {};
+      if (studentId) params.student_id = studentId;
+      if (academicYearId) params.academic_year_id = academicYearId;
+      const res = await client.get('/fees/receipts', { params });
       return res.data;
     },
+    enabled: !!studentId,
+    ...options,
+  });
+}
+
+// Payment modes for the Record Payment form's dropdown.
+export function usePaymentModes(options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'payment-modes'],
+    queryFn: async () => {
+      const res = await client.get('/fees/payment-modes');
+      return res.data;
+    },
+    staleTime: Infinity,
     ...options,
   });
 }
@@ -529,5 +551,201 @@ export function useCollectionReport(filters = {}, options = {}) {
       return res.data;
     },
     ...options,
+  });
+}
+// ── Class/Section Dashboard ─────────────────────────────────────────────────
+// Add this block to hooks/useFees.js (e.g. right after useCollectionReport).
+
+// Class-wise, section-wise student counts + fee totals.
+// Backed by GET /fees/reports/class-summary (admin/principal/accountant only).
+export function useClassSummary(academicYearId, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'class-summary', academicYearId],
+    queryFn: async () => {
+      const res = await client.get('/fees/reports/class-summary', {
+        params: academicYearId ? { academic_year_id: academicYearId } : {},
+      });
+      return res.data;
+    },
+    ...options,
+  });
+}
+
+// Search students by name. Backed by GET /academic/students?search=...
+// Returns StudentProfile rows (the id here is the correct id for fees/invoices —
+// NOT the auth User id, see note in FeesDashboard.jsx).
+export function useStudentSearch(searchTerm, options = {}) {
+  return useQuery({
+    queryKey: ['Students', 'search', searchTerm],
+    queryFn: async () => {
+      const res = await client.get('/academic/students', {
+        params: { search: searchTerm, page: 1, per_page: 20 },
+      });
+      return res.data?.data || [];
+    },
+    enabled: !!searchTerm && searchTerm.trim().length > 0,
+    ...options,
+  });
+}
+
+// Per-student fee summary (total_due, total_paid, balance).
+// Backed by GET /fees/ledger/{student_id}/summary — same endpoint useLedgerSummary
+// already uses, exposed here under a name that reads naturally in the dashboard.
+export function useStudentFeeSummary(studentId, academicYearId, options = {}) {
+  return useQuery({
+    queryKey: ['Fees', 'ledger-summary', studentId, academicYearId],
+    queryFn: async () => {
+      const res = await client.get(`/fees/ledger/${studentId}/summary`, {
+        params: academicYearId ? { academic_year_id: academicYearId } : undefined,
+      });
+      return res.data;
+    },
+    enabled: !!studentId,
+    ...options,
+  });
+}
+export function useStudentsBySection(sectionId, academicYearId, options = {}) {
+  return useQuery({
+    queryKey: ['Students', 'by-section', sectionId, academicYearId],
+    queryFn: async () => {
+      const params = { section_id: sectionId, page: 1, per_page: 200 };
+      if (academicYearId) params.academic_year_id = academicYearId;
+      const res = await client.get('/academic/students', { params });
+      return res.data?.data || [];
+    },
+    enabled: !!sectionId,
+    ...options,
+  });
+}
+ 
+// Fee structures, optionally filtered by academic year / class.
+// Backed by GET /fees/structures (now returns class_name, fee_head_name,
+// is_new_student, installment_count — see service.py/schemas.py patches).
+export function useFeeStructuresDetailed(filters = {}, options = {}) {
+  return useQuery({
+    queryKey: ['Fee Structures', 'detailed', filters],
+    queryFn: async () => {
+      const params = {};
+      if (filters.academicYearId) params.academic_year_id = filters.academicYearId;
+      if (filters.classId) params.class_id = filters.classId;
+      const res = await client.get('/fees/structures', { params });
+      return res.data;
+    },
+    ...options,
+  });
+}
+ 
+// Fee heads (Tuition, Transport, etc.) — for the structure create/edit form's dropdown.
+export function useFeeHeadsList(options = {}) {
+  return useQuery({
+    queryKey: ['Fee Heads', 'list'],
+    queryFn: async () => {
+      const res = await client.get('/fees/heads');
+      return res.data;
+    },
+    ...options,
+  });
+}
+
+export function useCreateFeeHead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ name }) => {
+      const res = await client.post('/fees/heads', { name, is_taxable: false, tax_percent: 0 });
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fee Heads', 'list'] });
+    },
+  });
+}
+ 
+export function useCreateFeeStructureDetailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data) => {
+      const res = await client.post('/fees/structures', data);
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fee Structures'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'class-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'defaulters'] });
+    },
+  });
+}
+ 
+export function useUpdateFeeStructureDetailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }) => {
+      const res = await client.patch(`/fees/structures/${id}`, data);
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['Fee Structures'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'ledger-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'class-summary'] });
+      qc.invalidateQueries({ queryKey: ['Fees', 'defaulters'] });
+    },
+  });
+}
+ 
+export function useDeleteFeeStructure() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      await client.delete(`/fees/structures/${id}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
+  });
+}
+ 
+export function useCreateFeeInstallment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (data) => {
+      const res = await client.post('/fees/installments', data);
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
+  });
+}
+ 
+// Installments for one structure — needed when opening the edit modal, since
+// GET /fees/structures only returns installment_count, not the rows themselves.
+// NOTE: this assumes a GET /fees/structures/{id}/installments endpoint — see
+// router_patch.md, it needs to be added alongside the update/delete endpoints.
+export function useStructureInstallments(structureId, options = {}) {
+  return useQuery({
+    queryKey: ['Fee Structures', 'installments', structureId],
+    queryFn: async () => {
+      const res = await client.get(`/fees/structures/${structureId}/installments`);
+      return res.data;
+    },
+    enabled: !!structureId,
+    ...options,
+  });
+}
+ 
+export function useUpdateFeeInstallment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, data }) => {
+      const res = await client.patch(`/fees/installments/${id}`, data);
+      return res.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
+  });
+}
+ 
+export function useDeleteFeeInstallment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id) => {
+      await client.delete(`/fees/installments/${id}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['Fee Structures'] }),
   });
 }

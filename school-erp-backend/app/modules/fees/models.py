@@ -24,28 +24,32 @@ class FeeStructure(Base, TimestampMixin):
     class_id = Column(UUID(as_uuid=True), ForeignKey("academic_classes.id"), nullable=False)
     fee_head_id = Column(UUID(as_uuid=True), ForeignKey("fee_heads.id"), nullable=False)
     amount = Column(Numeric(10, 2), nullable=False)
+    # True = this row's amount applies to newly-admitted students (first enrollment
+    # falls in the current academic year). False = applies to continuing/old students.
+    # Two FeeStructure rows per class (one True, one False) cover the old/new split.
+    is_new_student = Column(Boolean, nullable=False, default=False, server_default="false")
 
     fee_head = relationship("FeeHead")
-    installments = relationship("FeeInstallment", back_populates="structure")
+    installments = relationship(
+        "FeeInstallment", back_populates="structure", cascade="all, delete-orphan"
+    )
 
 
 class FeeInstallment(Base, TimestampMixin):
+    """
+    One installment/term within a Fee Structure, e.g. "Term 1" due 31-03-2026
+    for 40% of the structure's total amount. A structure's installments must
+    add up to 100% (enforced in the API layer, not the DB) so the UI can
+    show a running "X% of 100%" total while the admin builds them out.
+    """
     __tablename__ = "fee_installments"
 
-    structure_id = Column(UUID(as_uuid=True), ForeignKey("fee_structures.id"), nullable=False)
-    name = Column(String(100), nullable=False)
+    structure_id = Column(UUID(as_uuid=True), ForeignKey("fee_structures.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(50), nullable=False)
     due_date = Column(Date, nullable=False)
-    percent = Column(Integer, nullable=False)
+    percent = Column(Numeric(5, 2), nullable=False)
 
     structure = relationship("FeeStructure", back_populates="installments")
-
-
-class LateFeeRule(Base, TimestampMixin):
-    __tablename__ = "late_fee_rules"
-
-    structure_id = Column(UUID(as_uuid=True), ForeignKey("fee_structures.id"), nullable=False)
-    amount_per_day = Column(Numeric(10, 2), nullable=False)
-    max_amount = Column(Numeric(10, 2), nullable=True)
 
 
 class StudentDiscount(Base, TimestampMixin):
@@ -73,36 +77,24 @@ class StudentLedgerEntry(Base, TimestampMixin):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
 
-class Invoice(Base, TimestampMixin):
-    __tablename__ = "invoices"
+class FeeReceipt(Base, TimestampMixin):
+    """
+    A single payment made by a student, recorded by an accountant. There is
+    no Invoice anymore - what a student owes is computed on the fly from
+    FeeStructure (see service.get_student_fee_summary), and what they've
+    paid is the sum of their FeeReceipt rows for that academic year.
+    Each receipt is printable and individually numbered.
+    """
+    __tablename__ = "fee_receipts"
 
+    receipt_number = Column(String(30), unique=True, nullable=False, index=True)
     student_id = Column(UUID(as_uuid=True), ForeignKey("student_profiles.id"), nullable=False, index=True)
-    section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id", ondelete="SET NULL"), nullable=True, index=True)
-    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id", ondelete="SET NULL"), nullable=True, index=True)
-    installment_id = Column(UUID(as_uuid=True), ForeignKey("fee_installments.id"), nullable=False)
-    gross_amount = Column(Numeric(10, 2), nullable=False)
-    discount_amount = Column(Numeric(10, 2), nullable=False)
-    net_amount = Column(Numeric(10, 2), nullable=False)
-    paid_amount = Column(Numeric(10, 2), default=0, nullable=False)
-    due_date = Column(Date, nullable=False)
-    status = Column(String(20), nullable=False, default="PENDING", index=True)
-    paid_at = Column(DateTime(timezone=True), nullable=True)
-    late_fee_per_day = Column(Numeric(10, 2), nullable=False, default=0)
-    late_fee_max = Column(Numeric(10, 2), nullable=True)
-    razorpay_order_id = Column(String(100), nullable=True)
-    razorpay_payment_id = Column(String(100), nullable=True)
-    receipt_url = Column(Text, nullable=True)
-
-
-class Payment(Base, TimestampMixin):
-    __tablename__ = "payments"
-
-    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False)
+    academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id"), nullable=False, index=True)
     amount = Column(Numeric(10, 2), nullable=False)
     mode = Column(String(20), nullable=False)
     reference_no = Column(String(100), nullable=True)
-    received_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     notes = Column(Text, nullable=True)
+    received_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
 
 class JournalEntry(Base, TimestampMixin):
@@ -114,12 +106,3 @@ class JournalEntry(Base, TimestampMixin):
     credit_amount = Column(Numeric(10, 2), default=0, nullable=False)
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     status = Column(String(20), default="PENDING")
-
-
-class PaymentOrder(Base, TimestampMixin):
-    __tablename__ = "payment_orders"
-
-    invoice_id = Column(UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=False)
-    razorpay_order_id = Column(String(100), unique=True, nullable=False)
-    amount = Column(Numeric(10, 2), nullable=False)
-    status = Column(String(20), nullable=False, default="CREATED")

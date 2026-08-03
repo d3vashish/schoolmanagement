@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useAuth } from '../context/AuthContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
-import { getList, adminGetList } from '../api/frappe';
+import { getList, adminGetList, client } from '../api/frappe';
 import { useTimetable } from '../hooks/useTimetable';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -42,7 +42,7 @@ const SLOT_COLORS = [
 ];
 
 const slotSchema = z.object({
-  section_id: z.string().min(1, 'Class is required'),
+  section_id: z.string().min(1, 'Section is required'),
   subject_id: z.string().min(1, 'Subject is required'),
   instructor_id: z.string().min(1, 'Teacher is required'),
   day_of_week: z.number().int().min(0).max(6),
@@ -88,15 +88,9 @@ export default function Timetable() {
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [selectedClass, setSelectedClass] = useState('');
   const [selectedGroup, setSelectedGroup] = useState('');
   const [hoveredSlot, setHoveredSlot] = useState(null);
-
-  const groupFilters = [];
-  if (isTeacher && teacherGroupNames.length > 0) {
-    groupFilters.push(['name', 'in', teacherGroupNames]);
-  } else if (!isTeacher && selectedYear) {
-    groupFilters.push(['academic_year', '=', selectedYear]);
-  }
 
   const filters = {};
   if (!isTeacher && selectedGroup) filters.section_id = selectedGroup;
@@ -104,26 +98,43 @@ export default function Timetable() {
   const { slots, create, update, remove, saving } = useTimetable(filters);
 
   const { data: courses = [] } = useQuery({
-    queryKey: ['Course', 'list', isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Course', [], ['name', 'course_name'], 100)
-      : getList('Course', [], ['name', 'course_name'], 100),
+    queryKey: ['academic-subjects'],
+    queryFn: async () => {
+      const res = await client.get('/academic/subjects');
+      return res.data;
+    },
+    staleTime: 2 * 60 * 1000,
+  });
+  const { data: classes = [] } = useQuery({
+    queryKey: ['academic-classes'],
+    queryFn: async () => {
+      const res = await client.get('/academic/classes');
+      return res.data;
+    },
     staleTime: 2 * 60 * 1000,
   });
   const { data: groups = [] } = useQuery({
-    queryKey: ['Student Group', 'list', isTeacher, teacherGroupNames.join(','), selectedYear, isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Student Group', groupFilters, ['name', 'student_group_name'], 100)
-      : getList('Student Group', groupFilters, ['name', 'student_group_name'], 100),
+    queryKey: ['academic-sections'],
+    queryFn: async () => {
+      const res = await client.get('/academic/sections');
+      return res.data;
+    },
     staleTime: 2 * 60 * 1000,
   });
   const { data: instructors = [] } = useQuery({
-    queryKey: ['Instructor', 'list', isAdmin],
-    queryFn: () => isAdmin
-      ? adminGetList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100)
-      : getList('Instructor', [['status', '=', 'Active']], ['name', 'instructor_name'], 100),
-    staleTime: 2 * 60 * 1000,
+    queryKey: ['staff-instructors'],
+    queryFn: async () => {
+      const res = await client.get('/academic/instructors');
+      return res.data;
+    },
+   staleTime: 2 * 60 * 1000,
   });
+
+  // Sections that belong to the currently selected class (top bar)
+  const sectionsForSelectedClass = useMemo(
+    () => selectedClass ? groups.filter(g => g.class_id === selectedClass) : groups,
+    [groups, selectedClass]
+  );
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm({
     resolver: zodResolver(slotSchema),
@@ -137,12 +148,34 @@ export default function Timetable() {
   });
 
   const watchedDay = watch('day_of_week');
+  // Class is tracked separately in the modal (it's not part of the slot payload),
+  // section_id is the field that actually gets submitted.
+  const [modalClass, setModalClass] = useState('');
+  const watchedSection = watch('section_id');
 
+  // Sections that belong to the class currently selected inside the modal
+  const sectionsForModalClass = useMemo(
+    () => modalClass ? groups.filter(g => g.class_id === modalClass) : groups,
+    [groups, modalClass]
+  );
+
+  // Initialize top-bar Class once classes load
   useEffect(() => {
-    if (!isTeacher && groups.length > 0 && !selectedGroup) {
-      setSelectedGroup(groups[0].name);
+    if (!isTeacher && classes.length > 0 && !selectedClass) {
+      setSelectedClass(classes[0].id);
     }
-  }, [groups, isTeacher, selectedGroup]);
+  }, [classes, isTeacher, selectedClass]);
+
+  // Whenever the top-bar Class changes, make sure the Section selection is
+  // valid for that class (auto-pick the first section in the new class).
+  useEffect(() => {
+    if (isTeacher) return;
+    if (!selectedClass) return;
+    const stillValid = sectionsForSelectedClass.some(s => s.id === selectedGroup);
+    if (!stillValid) {
+      setSelectedGroup(sectionsForSelectedClass[0]?.id || '');
+    }
+  }, [selectedClass, sectionsForSelectedClass, isTeacher, selectedGroup]);
 
   const yearGroupNames = groups.map(g => g.name);
   const slotList = slots.data || [];
@@ -175,8 +208,11 @@ export default function Timetable() {
 
   const openAdd = () => {
     setEditingId(null);
+    const defaultSectionId = teacherGroupNames.length === 1 ? teacherGroupNames[0] : '';
+    const defaultSection = groups.find(g => g.id === defaultSectionId);
+    setModalClass(defaultSection?.class_id || selectedClass || '');
     reset({
-      section_id: teacherGroupNames.length === 1 ? teacherGroupNames[0] : '',
+      section_id: defaultSectionId,
       subject_id: '',
       instructor_id: '',
       day_of_week: 0,
@@ -187,6 +223,8 @@ export default function Timetable() {
 
   const openEdit = (slot) => {
     setEditingId(slot.id);
+    const section = groups.find(g => g.id === slot.section_id);
+    setModalClass(section?.class_id || '');
     reset({
       section_id: slot.section_id,
       subject_id: slot.subject_id,
@@ -259,9 +297,14 @@ export default function Timetable() {
               My Schedule
             </div>
           ) : (
-            <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)} className="input w-52">
-              {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
-            </select>
+            <>
+              <select value={selectedClass} onChange={e => setSelectedClass(e.target.value)} className="input w-40">
+                {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <select value={selectedGroup} onChange={e => setSelectedGroup(e.target.value)} className="input w-40">
+                {sectionsForSelectedClass.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </>
           )}
           {canEdit && (
             <button onClick={openAdd} className="btn-primary flex items-center gap-2 group btn-press">
@@ -503,31 +546,59 @@ export default function Timetable() {
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Subject</label>
                 <select {...register('subject_id')} className="input">
                   <option value="">Select Subject</option>
-                  {courses.map(c => <option key={c.name} value={c.name}>{c.course_name || c.name}</option>)}
+                  {courses.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {errors.subject_id && <p className="text-xs text-red-500 mt-1">{errors.subject_id.message}</p>}
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Class</label>
-                {isTeacher && teacherGroupNames.length === 1 ? (
+
+              {isTeacher && teacherGroupNames.length === 1 ? (
+                <div>
+                  <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Class &amp; Section</label>
                   <div className="input flex items-center bg-gray-50 text-gray-700 font-medium">
                     {teacherGroupNames[0]}
                   </div>
-                ) : (
-                  <select {...register('section_id')} className="input">
-                    <option value="">Select Class</option>
-                    {groups.map(g => <option key={g.name} value={g.name}>{g.student_group_name || g.name}</option>)}
-                  </select>
-                )}
-                {errors.section_id && <p className="text-xs text-red-500 mt-1">{errors.section_id.message}</p>}
-              </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Class</label>
+                    <select
+                      value={modalClass}
+                      onChange={(e) => {
+                        const newClass = e.target.value;
+                        setModalClass(newClass);
+                        const stillValid = groups.some(
+                          g => g.class_id === newClass && g.id === watchedSection
+                        );
+                        if (!stillValid) {
+                          const firstSection = groups.find(g => g.class_id === newClass);
+                          setValue('section_id', firstSection?.id || '');
+                        }
+                      }}
+                      className="input"
+                    >
+                      <option value="">Select Class</option>
+                      {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">Section</label>
+                    <select {...register('section_id')} className="input">
+                      <option value="">Select Section</option>
+                      {sectionsForModalClass.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              {errors.section_id && <p className="text-xs text-red-500 mt-1">{errors.section_id.message}</p>}
+
               <div>
                 <label className="block text-sm font-semibold text-[var(--color-text)] mb-1.5">
                   Teacher <span className="text-[var(--color-danger)]">*</span>
                 </label>
                 <select {...register('instructor_id')} className="input">
                   <option value="">Select Teacher</option>
-                  {instructors.map(i => <option key={i.name} value={i.name}>{i.instructor_name || i.name}</option>)}
+                  {instructors.map(i => <option key={i.id} value={i.id}>{i.first_name} {i.last_name || ''}</option>)}
                 </select>
                 {errors.instructor_id && <p className="text-xs text-red-500 mt-1">{errors.instructor_id.message}</p>}
               </div>

@@ -5,6 +5,7 @@ import {
   getExamResults, bulkSaveExamResults, updateExamResult,
   getGradingSchemes, createGradingScheme,
   getExamAggregates, triggerReportCards,
+  transitionExam, computeExam,
 } from '../api/frappe';
 
 export function useExams(params = {}) {
@@ -96,5 +97,24 @@ export function useExamAggregates(examId) {
 export function useTriggerReportCards() {
   return useMutation({
     mutationFn: triggerReportCards,
+  });
+}
+
+export function useTransitionExam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }) => transitionExam(id, action),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['exams'] });
+      qc.invalidateQueries({ queryKey: ['exam-results'] });
+    },
+  });
+}
+
+export function useComputeExam() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: computeExam,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['exam-aggregates'] }); },
   });
 }

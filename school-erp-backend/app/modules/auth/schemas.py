@@ -34,6 +34,11 @@ class OTPVerify(BaseModel):
     otp: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class UserCreate(BaseModel):
     email: str
     password: str

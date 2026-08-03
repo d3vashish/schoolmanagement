@@ -6,11 +6,11 @@ const COMMS = ['/live-class', '/messaging', '/notifications', '/store']
 const ROLES = {
   super_admin: { label: 'Administrator', pages: '*' },
   principal: { label: 'Administrator', pages: '*' },
-  teacher: { label: 'Instructor', pages: [...ACADEMIC, ...EXAMS, ...COMMS] },
+  teacher: { label: 'Instructor', pages: [...ACADEMIC.filter(pg => pg !== '/attendance'), ...EXAMS, ...COMMS] },
   accountant: { label: 'Accounts User', pages: [...FINANCE, '/students/lookup', '/messaging', '/notifications', '/store'] },
-  librarian: { label: 'Librarian', pages: ['/', '/students', '/students/lookup', '/attendance', '/reports', '/library', '/notifications'] },
-  parent: { label: 'Parent', pages: ['/', '/parent', '/attendance', '/timetable', '/homework', '/fees', '/live-class', '/messaging', '/notifications'] },
-  student: { label: 'Student', pages: ['/', '/attendance', '/timetable', '/homework', '/exams', '/class-tests', '/live-class', '/messaging', '/library', '/notifications'] },
+  librarian: { label: 'Librarian', pages: ['/', '/students', '/students/lookup', '/reports', '/library', '/notifications'] },
+  parent: { label: 'Parent', pages: ['/', '/parent', '/timetable', '/homework', '/fees', '/live-class', '/messaging', '/notifications'] },
+  student: { label: 'Student', pages: ['/', '/timetable', '/homework', '/exams', '/class-tests', '/live-class', '/messaging', '/library', '/notifications'] },
 }
 
 export default ROLES

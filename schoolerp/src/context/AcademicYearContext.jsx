@@ -1,71 +1,64 @@
 import { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getList } from '../api/frappe';
-import { useSettings } from './SettingsContext';
+import { client } from '../api/frappe';
 import { useAuth } from './AuthContext';
 
 const AcademicYearContext = createContext(null);
 
 export function AcademicYearProvider({ children }) {
-  const settings = useSettings();
   const { user } = useAuth();
-  const isTeacher = user?.roles?.includes('Instructor');
+  const isTeacher = user?.role === 'teacher';
 
   const { data: academicYears = [] } = useQuery({
-    queryKey: ['Academic Year'],
-    queryFn: () => getList('Academic Year', [], ['id', 'name', 'academic_year_name', 'year_start_date', 'year_end_date'], 50),
+    queryKey: ['academic-years'],
+    queryFn: async () => {
+      const res = await client.get('/academic/years');
+      return res.data;
+    },
     staleTime: 10 * 60 * 1000,
   });
 
-  const [selectedYear, setSelectedYearInternal] = useState(() => settings?.academic_year || '');
+  // selectedYear stores the UUID id
+  const [selectedYear, setSelectedYearInternal] = useState('');
 
+  // Auto-select active year on load
   useEffect(() => {
-    if (settings?.academic_year && !selectedYear) {
-      setSelectedYearInternal(settings.academic_year);
+    if (academicYears.length > 0 && !selectedYear) {
+      const active = academicYears.find(y => y.is_current) || academicYears[0];
+      if (active) setSelectedYearInternal(active.id);
     }
-  }, [settings?.academic_year, selectedYear]);
+  }, [academicYears, selectedYear]);
 
-  const setSelectedYear = (year) => {
-    if (!isTeacher && year) setSelectedYearInternal(year);
+  const setSelectedYear = (yearId) => {
+    if (!isTeacher && yearId) setSelectedYearInternal(yearId);
   };
 
-  const currentYear = settings?.academic_year || '';
+  const selectedYearData = useMemo(
+    () => academicYears.find(y => y.id === selectedYear) || null,
+    [academicYears, selectedYear]
+  );
+
+  const currentYear = academicYears.find(y => y.is_current)?.id || '';
   const isCurrentYear = selectedYear === currentYear;
 
-  const selectedYearData = useMemo(() => academicYears.find(y => y.name === selectedYear) || null, [academicYears, selectedYear]);
-  const yearStartDate = selectedYearData?.year_start_date || '';
-  const yearEndDate = selectedYearData?.year_end_date || '';
-
-  const { data: yearGroups = [] } = useQuery({
-    queryKey: ['Student Group', 'list', { academic_year: selectedYear }],
-    queryFn: () => {
-      const filters = selectedYear ? [['academic_year', '=', selectedYear]] : [];
-      return getList('Student Group', filters, ['name', 'student_group_name', 'program', 'class_teacher', 'academic_year'], 500);
-    },
-    enabled: !!selectedYear,
-    staleTime: 2 * 60 * 1000,
-  });
-
-  const yearPrograms = useMemo(() => {
-    const seen = new Map();
-    yearGroups.forEach(g => { if (g.program && !seen.has(g.program)) seen.set(g.program, { name: g.program, program_name: g.program }); });
-    return [...seen.values()].sort((a, b) => {
-      const n = s => parseInt((s.program_name || s.name).match(/\d+/)?.[0] || '0');
-      return n(a) - n(b);
-    });
-  }, [yearGroups]);
-
-  const yearGroupNames = useMemo(() => yearGroups.map(g => g.name), [yearGroups]);
-
   const value = {
-    selectedYear, selectedYearId: selectedYearData?.id || null,
-    setSelectedYear, academicYears, currentYear, isCurrentYear,
-    yearStartDate, yearEndDate, isTeacher, loading: settings?.loading,
-    yearGroups, yearPrograms, yearGroupNames,
+    selectedYear,       // UUID
+    selectedYearId: selectedYearData?.id || null,  // alias (selectedYear already holds the id)
+    setSelectedYear,
+    academicYears,      // [{id, name, start_date, end_date, is_active}]
+    selectedYearData,
+    currentYear,
+    isCurrentYear,
+    isTeacher,
+    yearGroups: [],
+    yearPrograms: [],
+    yearGroupNames: [],
   };
 
   return (
-    <AcademicYearContext.Provider value={value}>{children}</AcademicYearContext.Provider>
+    <AcademicYearContext.Provider value={value}>
+      {children}
+    </AcademicYearContext.Provider>
   );
 }
 

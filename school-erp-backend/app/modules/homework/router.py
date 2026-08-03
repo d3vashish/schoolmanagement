@@ -77,6 +77,26 @@ async def create_homework(
 ):
     data = body.model_dump(exclude_none=True)
     data["assigned_by"] = current_user["id"]
+
+    # Resolve the teacher's staff_profile id so for_homework's scoper
+    # (which filters on created_by_id, the real FK) can actually find
+    # this row again. Without this, every homework a teacher creates
+    # is invisible in their own list immediately after creation.
+    from app.modules.auth.models import StaffProfile
+    sp = await db.execute(
+        select(StaffProfile.id).where(StaffProfile.user_id == current_user["id"])
+    )
+    data["created_by_id"] = sp.scalar_one_or_none()
+
+    # Resolve student_group (section name) too, since the student/parent
+    # scopers in for_homework still filter on that legacy string column,
+    # not section_id.
+    if data.get("section_id"):
+        from app.modules.academic.models import Section
+        section = await db.get(Section, data["section_id"])
+        if section:
+            data["student_group"] = section.name
+
     hw = HomeworkAssignment(**data)
     db.add(hw)
     await db.flush()
@@ -88,7 +108,18 @@ async def update_homework(homework_id: str, body: HomeworkUpdate, db: AsyncSessi
     hw = await db.get(HomeworkAssignment, homework_id)
     if not hw:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Homework not found")
-    for field, value in body.model_dump(exclude_none=True).items():
+
+    update_data = body.model_dump(exclude_none=True)
+
+    # Keep student_group in sync if section_id changes on an edit too,
+    # for the same reason as in create_homework above.
+    if "section_id" in update_data:
+        from app.modules.academic.models import Section
+        section = await db.get(Section, update_data["section_id"])
+        if section:
+            update_data["student_group"] = section.name
+
+    for field, value in update_data.items():
         setattr(hw, field, value)
     await db.flush()
     return hw

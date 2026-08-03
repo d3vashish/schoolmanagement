@@ -39,9 +39,11 @@ class StudentProfile(Base, TimestampMixin):
     last_name = Column(String(100), nullable=False)
     date_of_birth = Column(DateTime(timezone=True), nullable=True)
     admission_number = Column(String(50), unique=True, nullable=False)
+    aadhar_number = Column(String(12), nullable=False)
     guardian_name = Column(String(200), nullable=True)
     guardian_phone = Column(String(20), nullable=True)
     address = Column(Text, nullable=True)
+    is_new_student = Column(Boolean, nullable=True)
 
     user = relationship("User", back_populates="student_profiles")
 

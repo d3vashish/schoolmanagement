@@ -1,75 +1,72 @@
-import { getList, getDoc, createDoc, updateDoc, deleteDoc } from './frappe';
+// api/homework.js
+//
+// Rewritten to call your real FastAPI backend (see app/modules/homework/router.py)
+// instead of the old Frappe-shaped calls (getList/createDoc from './frappe').
+//
+// Field mapping notes:
+// - "Class" in the UI maps to picking a (section_id, subject_id) pair from
+//   the logged-in teacher's own teaching profile (GET /academic/my-teaching-profile),
+//   NOT a generic /academic/sections list. A teacher only assigns homework to
+//   classes/subjects they actually teach.
+// - Google Classroom fields (gc_*, sync_status, sync_error, gc_attempted_at)
+//   are intentionally dropped here. The DB columns still exist (no migration
+//   run), but this app no longer reads or writes them.
 
-const DOCTYPE = 'Homework Assignment';
+import { apiGet, apiPost, apiPatch, apiDelete } from './fastapi';
 
 export async function getHomeworkList(filters = {}) {
-  const filterArr = [];
-  if (filters.studentGroup) filterArr.push(['student_group', '=', filters.studentGroup]);
-  if (filters.courseId) filterArr.push(['course', '=', filters.courseId]);
-  if (filters.assignedBy) filterArr.push(['assigned_by', '=', filters.assignedBy]);
-  if (filters.status) filterArr.push(['status', '=', filters.status]);
+  const params = new URLSearchParams();
+  if (filters.sectionId) params.set('section_id', filters.sectionId);
+  if (filters.subjectId) params.set('subject_id', filters.subjectId);
+  if (filters.status) params.set('status', filters.status);
 
-  const items = await getList(DOCTYPE, filterArr, [
-    'name', 'title', 'description', 'course', 'course_name', 'subject_id',
-    'student_group', 'class_name', 'academic_year', 'due_date',
-    'max_points', 'assigned_by', 'assigned_by_name', 'assigned_date',
-    'status', 'gc_course_id', 'gc_course_work_id', 'gc_invite_code',
-    'gc_course_link', 'sync_status', 'sync_error', 'gc_attempted_at',
-    'creation',
-  ], 200);
+  const qs = params.toString();
+  const items = await apiGet(`/homework${qs ? `?${qs}` : ''}`);
 
-  items.sort((a, b) => new Date(b.assigned_date || b.creation) - new Date(a.assigned_date || a.creation));
+  items.sort(
+    (a, b) => new Date(b.assigned_date || b.created_at) - new Date(a.assigned_date || a.created_at)
+  );
   return items;
 }
 
-export async function getHomeworkDoc(name) {
-  return getDoc(DOCTYPE, name);
+export async function getHomeworkDoc(id) {
+  return apiGet(`/homework/${id}`);
 }
 
 export async function createHomework(data) {
-  const doc = {
+  const payload = {
     title: data.title,
     description: data.description || '',
-    subject_id: data.subject_id || null,
-    course: data.courseId || '',
-    course_name: data.courseName || '',
-    student_group: data.studentGroup || '',
+    subject_id: data.subjectId || null,
+    section_id: data.sectionId || null,
     class_name: data.className || '',
-    academic_year: data.academicYear || '',
-    due_date: data.dueDate || '',
+    due_date: data.dueDate || null,
     max_points: data.maxPoints != null ? Number(data.maxPoints) : null,
-    assigned_by: data.assignedBy || '',
-    assigned_by_name: data.assignedByName || '',
-    assigned_date: new Date().toISOString().slice(0, 10),
     status: 'Published',
-    sync_status: 'pending',
   };
-  return createDoc(DOCTYPE, doc);
+  return apiPost('/homework', payload);
 }
 
-export async function updateHomework(name, updates) {
+export async function updateHomework(id, updates) {
   const mapped = {};
   if (updates.title !== undefined) mapped.title = updates.title;
   if (updates.description !== undefined) mapped.description = updates.description;
-  if (updates.subject_id !== undefined) mapped.subject_id = updates.subject_id;
-  if (updates.courseId !== undefined) mapped.course = updates.courseId;
-  if (updates.courseName !== undefined) mapped.course_name = updates.courseName;
-  if (updates.studentGroup !== undefined) mapped.student_group = updates.studentGroup;
+  if (updates.subjectId !== undefined) mapped.subject_id = updates.subjectId;
+  if (updates.sectionId !== undefined) mapped.section_id = updates.sectionId;
   if (updates.className !== undefined) mapped.class_name = updates.className;
   if (updates.dueDate !== undefined) mapped.due_date = updates.dueDate;
   if (updates.maxPoints !== undefined) mapped.max_points = Number(updates.maxPoints);
   if (updates.status !== undefined) mapped.status = updates.status;
-  if (updates.gcCourseId !== undefined) mapped.gc_course_id = updates.gcCourseId;
-  if (updates.gcCourseWorkId !== undefined) mapped.gc_course_work_id = updates.gcCourseWorkId;
-  if (updates.gcInviteCode !== undefined) mapped.gc_invite_code = updates.gcInviteCode;
-  if (updates.gcCourseLink !== undefined) mapped.gc_course_link = updates.gcCourseLink;
-  if (updates.syncStatus !== undefined) mapped.sync_status = updates.syncStatus;
-  if (updates.syncError !== undefined) mapped.sync_error = updates.syncError;
-  if (updates.gcAttemptedAt !== undefined) mapped.gc_attempted_at = updates.gcAttemptedAt;
 
-  return updateDoc(DOCTYPE, name, mapped);
+  return apiPatch(`/homework/${id}`, mapped);
 }
 
-export async function deleteHomework(name) {
-  return deleteDoc(DOCTYPE, name);
+export async function deleteHomework(id) {
+  return apiDelete(`/homework/${id}`);
+}
+
+// Used to populate the "Class" dropdown in the Assign form.
+// Returns only the classes/sections/subjects the logged-in teacher actually teaches.
+export async function getMyTeachingProfile() {
+  return apiGet('/academic/my-teaching-profile');
 }

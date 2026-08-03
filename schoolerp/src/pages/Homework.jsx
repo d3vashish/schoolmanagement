@@ -1,17 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 
-import { useAcademicYear } from '../context/AcademicYearContext';
-import { useHomeworkList, useCreateHomework, useUpdateHomework, useDeleteHomework } from '../hooks/useHomework';
-import { useSubjects } from '../hooks/useSubjects';
-import {
-  useGCConnection, useGCConnect, useGCDisconnect, useGCSync,
-} from '../hooks/useGoogleClassroom';
-import { setupHomeworkDocTypes } from '../utils/setupDocTypes';
+import { useHomeworkList, useCreateHomework, useUpdateHomework, useDeleteHomework, useMyTeachingProfile } from '../hooks/useHomework';
 import {
   Plus, BookOpen, Clock, AlertCircle, Calendar, Award,
   Trash2, Edit3, X, Loader2, FileText, Users, ChevronDown,
-  GraduationCap, Search, Copy, Check, RefreshCw, LogIn, LogOut,
+  GraduationCap, Search,
 } from 'lucide-react';
 
 function getDueStatus(dueDate) {
@@ -26,152 +20,60 @@ function getDueStatus(dueDate) {
   return { label: `Due ${due.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`, color: 'text-[#8A8680]', bg: 'bg-[#F0EAE4]/40', icon: Calendar };
 }
 
+// Administrators/principals can see everything; teachers can only assign
+// for classes in their own teaching profile (enforced again below).
 function useCanAssign() {
   const { user } = useAuth();
   const roles = user?.roles || [];
   return roles.includes('Administrator') || roles.includes('Instructor') || roles.includes('Academics User');
 }
 
-function SyncBadge({ status, gcInviteCode, onRetry }) {
-  if (status === 'synced') {
-    return (
-      <div className="flex items-center gap-2 flex-wrap mt-2 pt-2 border-t border-[#F0EAE4]">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-green-700 bg-green-50 px-2 py-1 rounded-[8px]">
-          <Check size={12} />
-          Synced to Google Classroom
-        </span>
-        {gcInviteCode && (
-          <button
-            onClick={() => navigator.clipboard.writeText(gcInviteCode)}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#FF8C42] hover:text-[#E87A30] px-2 py-1 rounded-[8px] hover:bg-[#FFF1E8] transition-[color,background-color] duration-200 cursor-pointer"
-            title="Copy invite code"
-          >
-            <Copy size={12} />
-            Invite: {gcInviteCode}
-          </button>
-        )}
-      </div>
-    );
-  }
-  if (status === 'failed') {
-    return (
-      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#F0EAE4]">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-red-600 bg-red-50 px-2 py-1 rounded-[8px]">
-          <AlertCircle size={12} />
-          Sync failed
-        </span>
-        {onRetry && (
-          <button onClick={onRetry}
-            className="inline-flex items-center gap-1 text-[11px] font-medium text-[#FF8C42] hover:text-[#E87A30] px-2 py-1 rounded-[8px] hover:bg-[#FFF1E8] transition-[color,background-color] duration-200 cursor-pointer"
-          >
-            <RefreshCw size={12} />
-            Retry
-          </button>
-        )}
-      </div>
-    );
-  }
-  if (status === 'syncing') {
-    return (
-      <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[#F0EAE4]">
-        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#D4732E] bg-[#FFF1E8] px-2 py-1 rounded-[8px]">
-          <Loader2 size={12} className="animate-spin" />
-          Syncing to Google Classroom...
-        </span>
-      </div>
-    );
-  }
-  return null;
-}
-
-function HomeworkModal({ editing, subjects, groups, onClose }) {
-  const { user } = useAuth();
-  const { selectedYear } = useAcademicYear();
+function HomeworkModal({ editing, teachingAssignments, onClose }) {
   const create = useCreateHomework();
   const update = useUpdateHomework();
-  const gcConnect = useGCConnect();
-  const gcSync = useGCSync();
-  const { data: gcState } = useGCConnection();
-  const busy = create.isPending || update.isPending || gcSync.isPending;
+  const busy = create.isPending || update.isPending;
+
+  // Find the matching teaching-profile row for an assignment being edited,
+  // so the combined dropdown pre-selects correctly.
+  const editingAssignmentId = editing
+    ? teachingAssignments.find(
+        a => a.section_id === editing.section_id && a.subject_id === editing.subject_id
+      )?.id
+    : '';
 
   const [form, setForm] = useState({
     title: editing?.title || '',
     description: editing?.description || '',
-    subjectId: editing?.subject_id || editing?.course || '',
-    studentGroup: editing?.student_group || '',
+    assignmentId: editingAssignmentId || '',
     dueDate: editing?.due_date || '',
     maxPoints: editing?.max_points ?? '',
-    syncToGC: false,
   });
 
-  const selectedSubject = subjects.find(s => s.id === form.subjectId);
-  const selectedGroup = groups.find(g => g.name === form.studentGroup);
+  const selected = teachingAssignments.find(a => a.id === form.assignmentId);
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.title.trim()) return;
+    if (!form.title.trim() || !selected) return;
 
     const payload = {
       title: form.title.trim(),
       description: form.description.trim(),
-      subject_id: form.subjectId,
-      courseName: selectedSubject?.name || form.subjectId,
-      studentGroup: form.studentGroup,
-      className: selectedGroup?.student_group_name || form.studentGroup,
-      academicYear: selectedYear || '',
-      dueDate: form.dueDate,
+      subjectId: selected.subject_id,
+      sectionId: selected.section_id,
+      className: `${selected.class_name} - ${selected.section_name}`,
+      dueDate: form.dueDate || null,
       maxPoints: form.maxPoints,
-      assignedBy: user?.name || user?.usr || '',
-      assignedByName: user?.full_name || user?.usr || '',
     };
 
     try {
-      let result;
       if (editing) {
-        await update.mutateAsync({ name: editing.name, updates: payload });
-        result = editing;
+        await update.mutateAsync({ id: editing.id, updates: payload });
       } else {
-        result = await create.mutateAsync(payload);
+        await create.mutateAsync(payload);
       }
-
       onClose();
-
-      // Fire-and-forget Google Classroom sync — never blocks the save
-      if (form.syncToGC && gcState?.connected && result?.name) {
-        (async () => {
-          try {
-            const { getAccessToken } = await import('../api/googleClassroom');
-            const token = getAccessToken();
-            if (!token) return;
-            const syncResult = await gcSync.mutateAsync({
-              homework: payload,
-              className: payload.className,
-              courseName: payload.courseName,
-              gcToken: token,
-            });
-            await update.mutateAsync({
-              name: result.name,
-              updates: {
-                gcCourseId: syncResult.gcCourseId,
-                gcCourseWorkId: syncResult.gcCourseWorkId,
-                gcInviteCode: syncResult.gcInviteCode,
-                gcCourseLink: syncResult.gcCourseLink,
-                syncStatus: 'synced',
-              },
-            });
-          } catch (syncErr) {
-            console.warn('Google Classroom sync failed:', syncErr.message);
-            try {
-              await update.mutateAsync({
-                name: result.name,
-                updates: { syncStatus: 'failed', syncError: syncErr.message },
-              });
-            } catch (_) { /* best effort */ }
-          }
-        })();
-      }
     } catch (err) {
-      alert(err.response?.readableMessage || err.message);
+      alert(err.message);
     }
   }
 
@@ -191,39 +93,28 @@ function HomeworkModal({ editing, subjects, groups, onClose }) {
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-[#8A8680] mb-1.5 uppercase tracking-wide">
-                Class <span className="text-red-400">*</span>
-              </label>
-              <select
-                required
-                value={form.studentGroup}
-                onChange={e => setForm(f => ({ ...f, studentGroup: e.target.value }))}
-                className="w-full px-3.5 py-2.5 rounded-[10px] text-sm border border-[#E8E0D8] bg-white text-[#2D2A24] appearance-none cursor-pointer transition-[border-color,box-shadow] duration-200 focus:border-[#FF8C42] focus:shadow-[0_0_0_3px_rgba(255,140,66,0.1)]"
-              >
-                <option value="">Select class</option>
-                {groups.map(g => (
-                  <option key={g.name} value={g.name}>{g.student_group_name}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-[#8A8680] mb-1.5 uppercase tracking-wide">
-                Subject <span className="text-red-400">*</span>
-              </label>
-              <select
-                required
-                value={form.subjectId}
-                onChange={e => setForm(f => ({ ...f, subjectId: e.target.value }))}
-                className="w-full px-3.5 py-2.5 rounded-[10px] text-sm border border-[#E8E0D8] bg-white text-[#2D2A24] appearance-none cursor-pointer transition-[border-color,box-shadow] duration-200 focus:border-[#FF8C42] focus:shadow-[0_0_0_3px_rgba(255,140,66,0.1)]"
-              >
-                <option value="">Select subject</option>
-                {subjects.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="block text-xs font-semibold text-[#8A8680] mb-1.5 uppercase tracking-wide">
+              Class & Subject <span className="text-red-400">*</span>
+            </label>
+            <select
+              required
+              value={form.assignmentId}
+              onChange={e => setForm(f => ({ ...f, assignmentId: e.target.value }))}
+              className="w-full px-3.5 py-2.5 rounded-[10px] text-sm border border-[#E8E0D8] bg-white text-[#2D2A24] appearance-none cursor-pointer transition-[border-color,box-shadow] duration-200 focus:border-[#FF8C42] focus:shadow-[0_0_0_3px_rgba(255,140,66,0.1)]"
+            >
+              <option value="">Select class & subject</option>
+              {teachingAssignments.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.class_name} - {a.section_name} · {a.subject_name}
+                </option>
+              ))}
+            </select>
+            {teachingAssignments.length === 0 && (
+              <p className="text-[11px] text-[#8A8680] mt-1.5">
+                You don't have any classes assigned to you yet. Contact an administrator.
+              </p>
+            )}
           </div>
 
           <div>
@@ -280,21 +171,6 @@ function HomeworkModal({ editing, subjects, groups, onClose }) {
             </div>
           </div>
 
-          <label className="flex items-center gap-3 py-1">
-            <input
-              type="checkbox"
-              checked={form.syncToGC}
-              onChange={e => setForm(f => ({ ...f, syncToGC: e.target.checked }))}
-              className="w-4 h-4 rounded-[4px] border border-[#E8E0D8] text-[#FF8C42] focus:ring-[#FF8C42] cursor-pointer"
-            />
-            <span className="text-sm font-medium text-[#2D2A24]">
-              Sync to Google Classroom
-              {!gcState?.connected && (
-                <span className="text-[11px] text-[#8A8680] ml-1.5">(not connected)</span>
-              )}
-            </span>
-          </label>
-
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose}
               className="flex-1 px-4 py-2.5 rounded-[10px] border border-[#E8E0D8] text-[#2D2A24] font-medium text-sm hover:bg-[#F0EAE4] transition-[background-color] duration-200 cursor-pointer">
@@ -312,7 +188,7 @@ function HomeworkModal({ editing, subjects, groups, onClose }) {
   );
 }
 
-function HomeworkCard({ hw, onEdit, onDelete, canAssign, onRetrySync }) {
+function HomeworkCard({ hw, onEdit, onDelete, canAssign }) {
   const status = getDueStatus(hw.due_date);
   const StatusIcon = status.icon;
 
@@ -333,7 +209,7 @@ function HomeworkCard({ hw, onEdit, onDelete, canAssign, onRetrySync }) {
               title="Edit assignment">
               <Edit3 size={14} />
             </button>
-            <button onClick={() => onDelete(hw.name)}
+            <button onClick={() => onDelete(hw.id)}
               className="p-1.5 rounded-[8px] hover:bg-[#F0EAE4] text-[#8A8680] hover:text-red-500 transition-[color,background-color] duration-200 cursor-pointer"
               title="Delete assignment">
               <Trash2 size={14} />
@@ -357,20 +233,14 @@ function HomeworkCard({ hw, onEdit, onDelete, canAssign, onRetrySync }) {
 
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-[#8A8680] ml-auto">
           <Users size={12} />
-          {hw.class_name || hw.student_group}
+          {hw.class_name}
         </span>
       </div>
-
-      <SyncBadge
-        status={hw.sync_status}
-        gcInviteCode={hw.gc_invite_code}
-        onRetry={hw.sync_status === 'failed' ? () => onRetrySync(hw) : undefined}
-      />
     </div>
   );
 }
 
-function CourseGroup({ courseName, assignments, canAssign, onEdit, onDelete, onRetrySync }) {
+function SubjectGroup({ subjectName, assignments, canAssign, onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -384,7 +254,7 @@ function CourseGroup({ courseName, assignments, canAssign, onEdit, onDelete, onR
             <BookOpen size={16} className="text-[#D4732E]" />
           </div>
           <div className="min-w-0">
-            <h2 className="font-semibold text-[#2D2A24] text-sm truncate">{courseName}</h2>
+            <h2 className="font-semibold text-[#2D2A24] text-sm truncate">{subjectName}</h2>
             <p className="text-[11px] font-medium text-[#8A8680] mt-0.5">{assignments.length} assignment{assignments.length !== 1 ? 's' : ''}</p>
           </div>
         </div>
@@ -395,12 +265,11 @@ function CourseGroup({ courseName, assignments, canAssign, onEdit, onDelete, onR
         <div className="px-5 pb-5 space-y-3">
           {assignments.map(hw => (
             <HomeworkCard
-              key={hw.name}
+              key={hw.id}
               hw={hw}
               canAssign={canAssign}
               onEdit={onEdit}
               onDelete={onDelete}
-              onRetrySync={onRetrySync}
             />
           ))}
         </div>
@@ -426,99 +295,39 @@ function EmptyState({ canAssign, search }) {
 }
 
 export default function Homework() {
-  const { user } = useAuth();
-  const { yearGroups } = useAcademicYear();
   const canAssign = useCanAssign();
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [setupDone, setSetupDone] = useState(false);
 
-  const { data: allSubjects = [], isLoading: subjectsLoading } = useSubjects();
   const { data: allHomework = [], isLoading: hwLoading } = useHomeworkList();
+  const { data: teachingProfile, isLoading: profileLoading } = useMyTeachingProfile();
   const deleteHw = useDeleteHomework();
-  const updateHw = useUpdateHomework();
-  const gcConnect = useGCConnect();
-  const gcDisconnect = useGCDisconnect();
-  const gcSync = useGCSync();
-  const { data: gcState, isLoading: gcLoading } = useGCConnection();
 
-  useEffect(() => {
-    if (!setupDone) {
-      setSetupDone(true);
-      setupHomeworkDocTypes().catch(() => {});
-    }
-  }, [setupDone]);
-
-  const groups = yearGroups || [];
+  const teachingAssignments = teachingProfile?.assignments || [];
 
   const filtered = allHomework.filter(hw => {
     if (!search) return true;
     const q = search.toLowerCase();
     return hw.title?.toLowerCase().includes(q)
-      || hw.course_name?.toLowerCase().includes(q)
       || hw.class_name?.toLowerCase().includes(q)
       || hw.description?.toLowerCase().includes(q);
   });
 
   const grouped = {};
   filtered.forEach(hw => {
-    const subject = allSubjects.find(s => s.id === hw.subject_id);
-    const key = subject ? subject.name : (hw.course_name || 'General');
+    const assignment = teachingAssignments.find(a => a.subject_id === hw.subject_id);
+    const key = assignment?.subject_name || 'General';
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(hw);
   });
 
-  async function handleDelete(name) {
+  async function handleDelete(id) {
     if (!window.confirm('Delete this assignment?')) return;
-    await deleteHw.mutateAsync(name);
+    await deleteHw.mutateAsync(id);
   }
 
-  async function handleRetrySync(hw) {
-    const { getAccessToken } = await import('../api/googleClassroom');
-    const token = getAccessToken();
-    if (!token) {
-      alert('Google Classroom not connected. Please connect first.');
-      return;
-    }
-    try {
-      await updateHw.mutateAsync({ name: hw.name, updates: { syncStatus: 'syncing' } });
-      const syncResult = await gcSync.mutateAsync({
-        homework: hw,
-        className: hw.class_name,
-        courseName: hw.course_name,
-        gcToken: token,
-      });
-      await updateHw.mutateAsync({
-        name: hw.name,
-        updates: {
-          gcCourseId: syncResult.gcCourseId,
-          gcCourseWorkId: syncResult.gcCourseWorkId,
-          gcInviteCode: syncResult.gcInviteCode,
-          gcCourseLink: syncResult.gcCourseLink,
-          syncStatus: 'synced',
-          syncError: null,
-        },
-      });
-    } catch (err) {
-      await updateHw.mutateAsync({
-        name: hw.name,
-        updates: { syncStatus: 'failed', syncError: err.message },
-      });
-    }
-  }
-
-  async function handleGCConnect() {
-    try {
-      await gcConnect.mutateAsync();
-    } catch (err) {
-      alert(err.message);
-    }
-  }
-
-  async function handleGCDisconnect() {
-    await gcDisconnect.mutateAsync();
-  }
+  const isLoading = hwLoading || profileLoading;
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto pb-16">
@@ -544,30 +353,6 @@ export default function Homework() {
             />
           </div>
 
-          {canAssign && !gcLoading && (
-            gcState?.connected ? (
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-green-700 bg-green-50 px-2.5 py-1.5 rounded-[8px] flex items-center gap-1">
-                  <Check size={12} />
-                  {gcState.email || 'Connected'}
-                </span>
-                <button onClick={handleGCDisconnect}
-                  className="p-2 rounded-[10px] border border-[#E8E0D8] text-[#8A8680] hover:bg-[#F0EAE4] hover:text-red-500 transition-[color,background-color] duration-200 cursor-pointer"
-                  title="Disconnect Google Classroom"
-                >
-                  <LogOut size={14} />
-                </button>
-              </div>
-            ) : (
-              <button onClick={handleGCConnect} disabled={gcConnect.isPending}
-                className="inline-flex items-center gap-2 px-3.5 py-2.5 rounded-[10px] border border-[#E8E0D8] text-[#2D2A24] text-sm font-medium hover:bg-[#F0EAE4] transition-[background-color] duration-200 cursor-pointer disabled:opacity-60"
-              >
-                {gcConnect.isPending ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-                Connect Google Classroom
-              </button>
-            )
-          )}
-
           {canAssign && (
             <button
               onClick={() => { setEditing(null); setShowModal(true); }}
@@ -580,33 +365,32 @@ export default function Homework() {
         </div>
       </div>
 
-      {hwLoading || subjectsLoading ? (
+      {isLoading ? (
         <div className="flex items-center justify-center py-24">
           <Loader2 size={24} className="animate-spin text-[#8A8680]" />
         </div>
-      ) : allSubjects.length === 0 ? (
+      ) : canAssign && teachingAssignments.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center bg-white rounded-[28px] border border-[#F0EAE4] shadow-[0_2px_8px_rgba(0,0,0,0.02)]">
           <div className="w-[72px] h-[72px] rounded-[20px] bg-[#FFF1E8] flex items-center justify-center mb-5">
             <GraduationCap size={32} className="text-[#FF8C42]/60" />
           </div>
-          <h3 className="text-lg font-bold text-[#2D2A24] mb-1">No subjects configured</h3>
+          <h3 className="text-lg font-bold text-[#2D2A24] mb-1">No classes assigned to you</h3>
           <p className="text-sm font-medium text-[#8A8680] max-w-sm">
-            Add subjects in the Subjects section before creating assignments.
+            Ask an administrator to assign you to a class and subject before creating assignments.
           </p>
         </div>
       ) : Object.keys(grouped).length === 0 ? (
         <EmptyState canAssign={canAssign} search={search} />
       ) : (
         <div className="space-y-4">
-          {Object.entries(grouped).map(([courseName, assignments]) => (
-            <CourseGroup
-              key={courseName}
-              courseName={courseName}
+          {Object.entries(grouped).map(([subjectName, assignments]) => (
+            <SubjectGroup
+              key={subjectName}
+              subjectName={subjectName}
               assignments={assignments}
               canAssign={canAssign}
               onEdit={(hw) => { setEditing(hw); setShowModal(true); }}
               onDelete={handleDelete}
-              onRetrySync={handleRetrySync}
             />
           ))}
         </div>
@@ -615,8 +399,7 @@ export default function Homework() {
       {showModal && (
         <HomeworkModal
           editing={editing}
-          subjects={allSubjects}
-          groups={groups}
+          teachingAssignments={teachingAssignments}
           onClose={() => { setShowModal(false); setEditing(null); }}
         />
       )}

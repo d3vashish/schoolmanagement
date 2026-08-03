@@ -18,6 +18,7 @@ class AcademicYearResponse(BaseModel):
     start_date: date
     end_date: date
     is_active: bool
+    is_current: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -65,7 +66,7 @@ class SectionUpdate(BaseModel):
 
 class SubjectCreate(BaseModel):
     name: str
-    code: str
+    code: str | None = None
     is_graded: bool = True
     department: Optional[str] = None
     description: Optional[str] = None
@@ -78,7 +79,7 @@ class SubjectCreate(BaseModel):
 class SubjectResponse(BaseModel):
     id: UUID
     name: str
-    code: str
+    code: str | None = None
     is_graded: bool
     department: Optional[str] = None
     description: Optional[str] = None
@@ -110,7 +111,7 @@ class ClassSubjectResponse(BaseModel):
     class_id: UUID
     subject_id: UUID
     subject_name: str = ""
-    subject_code: str = ""
+    subject_code: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -145,6 +146,7 @@ class PromotionRequest(BaseModel):
     from_academic_year_id: UUID
     to_academic_year_id: UUID
     to_class_id: UUID
+    to_section_id: UUID | None = None
 
 
 class ProgressionResponse(BaseModel):
@@ -169,6 +171,7 @@ class StudentProfileResponse(BaseModel):
     name: str | None = None
     date_of_birth: datetime | None = None
     admission_number: str
+    aadhar_number: str | None = None
     student_group_name: str | None = None
     section_name: str | None = None
     guardian_name: str | None = None
@@ -241,17 +244,21 @@ class StudentCreate(BaseModel):
     last_name: str
     email: str
     password: str
+    aadhar_number: str
     date_of_birth: date | None = None
     class_id: str | None = None
     academic_year_id: str | None = None
+    section_id: str | None = None 
     guardian_name: str | None = None
     guardian_phone: str | None = None
     address: str | None = None
+    is_new_student: bool | None = None
 
 
 class StudentUpdate(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
+    aadhar_number: str | None = None
     date_of_birth: date | None = None
     guardian_name: str | None = None
     guardian_phone: str | None = None
@@ -286,6 +293,7 @@ class SectionDetailResponse(BaseModel):
     academic_year_id: UUID
     program: str = ""
     academic_year: str = ""
+    class_teacher_id: UUID | None = None 
     students: list[StudentProfileResponse] = []
 
     model_config = {"from_attributes": True}

@@ -1,172 +1,305 @@
+// components/fees/RecordPaymentModal.jsx
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { useRecordPayment, INR } from '../../hooks/useFees';
-import { client } from '../../api/frappe';
+import { useAcademicYear } from '../../context/AcademicYearContext';
+import {
+  useStudentSearch,
+  useRecordPayment,
+  usePaymentModes,
+  useStudentFeeSummary,
+  INR,
+} from '../../hooks/useFees';
+import { downloadReceiptPdf } from '../../lib/receiptPdf';
 
-const PAYMENT_MODES = ['CASH', 'CHEQUE', 'BANK_TRANSFER', 'ONLINE'];
+const num = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
 
-export default function RecordPaymentModal({ studentId, onClose, onSaved }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    invoice_id: '',
-    amount: '',
-    mode: 'CASH',
-    reference_no: '',
-    notes: '',
-  });
+// ── Step 1: pick a student ──────────────────────────────────────────────────
+function StudentPicker({ onSelect }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const { data: results = [], isLoading } = useStudentSearch(searchTerm);
 
-  const { data: invoices = [] } = useQuery({
-    queryKey: ['Fees', 'invoices', studentId],
-    queryFn: async () => {
-      const res = await client.get('/fees/invoices', { params: { student_id: studentId } });
-      return res.data;
-    },
-    enabled: !!studentId,
-  });
+  return (
+    <div>
+      <label className="text-xs font-medium text-gray-400 mb-2 block">Search a student</label>
+      <div className="relative">
+        <svg className="w-4 h-4 text-gray-300 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" />
+        </svg>
+        <input
+          autoFocus
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Type a student's name..."
+          className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]"
+        />
+      </div>
 
-  const mutation = useRecordPayment();
-  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      {searchTerm.trim().length > 0 && (
+        <div className="mt-2 border border-gray-100 rounded-xl max-h-64 overflow-y-auto">
+          {isLoading ? (
+            <div className="px-4 py-5 text-center text-sm text-gray-400">Searching...</div>
+          ) : results.length === 0 ? (
+            <div className="px-4 py-5 text-center text-sm text-gray-400">No students found for "{searchTerm}"</div>
+          ) : (
+            <div className="divide-y divide-gray-50">
+              {results.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => onSelect(s)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] font-bold text-sm shrink-0">
+                      {(s.student_name || '?')[0].toUpperCase()}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-[var(--color-text)]">{s.student_name}</p>
+                      <p className="text-xs text-gray-400">{s.student_group_name} • {s.section_name}</p>
+                    </div>
+                  </div>
+                  <svg className="w-4 h-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
-  const unpaidInvoices = invoices.filter(inv => inv.status !== 'PAID');
+// ── Step 2: payment form for the selected student ──────────────────────────
+function PaymentForm({ student, academicYear, onBack, onRecorded }) {
+  const { data: summary } = useStudentFeeSummary(student.id, academicYear);
+  const { data: modes = [] } = usePaymentModes();
+  const recordPayment = useRecordPayment();
 
-  const handleInvoiceChange = (invoiceId) => {
-    setField('invoice_id', invoiceId);
-    const inv = unpaidInvoices.find(i => i.id === invoiceId);
-    if (inv) {
-      const outstanding = (inv.net_amount || 0) - (inv.paid_amount || 0);
-      setField('amount', outstanding.toString());
-    }
-  };
+  const [amount, setAmount] = useState('');
+  const [mode, setMode] = useState('Cash');
+  const [referenceNo, setReferenceNo] = useState('');
+  const [notes, setNotes] = useState('');
+  const [formError, setFormError] = useState('');
 
-  const canSave = form.invoice_id && form.amount && parseFloat(form.amount) > 0;
+  const balance = num(summary?.balance);
 
-  const handleSave = async () => {
-    if (!form.invoice_id || !form.amount || parseFloat(form.amount) <= 0) {
-      setError('Please select an invoice and enter a valid amount.');
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setFormError('');
+
+    const amt = Number(amount);
+    if (!amt || amt <= 0) {
+      setFormError('Enter an amount greater than zero.');
       return;
     }
-    setSaving(true);
-    setError('');
 
     try {
-      await mutation.mutateAsync({
-        invoice_id: form.invoice_id,
-        amount: parseFloat(form.amount),
-        mode: form.mode.toUpperCase(),
-        reference_no: form.reference_no || undefined,
-        notes: form.notes || undefined,
+      const receipt = await recordPayment.mutateAsync({
+        student_id: student.id,
+        academic_year_id: academicYear,
+        amount: amt,
+        mode,
+        reference_no: referenceNo || null,
+        notes: notes || null,
       });
-      onSaved?.();
+      onRecorded(receipt);
     } catch (err) {
-      setError(err.response?.data?.detail || err.readableMessage || 'Failed to record payment.');
-    } finally {
-      setSaving(false);
+      setFormError(err?.readableMessage || err?.message || 'Failed to record payment.');
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <div>
-            <h2 className="text-lg font-bold text-[var(--color-text)]">Record Payment</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Record a payment for this student</p>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="flex items-center gap-3 pb-3 border-b border-gray-100">
+        <button type="button" onClick={onBack} className="text-gray-300 hover:text-gray-500 transition">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div className="w-9 h-9 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center text-[var(--color-primary)] font-bold shrink-0">
+          {(student.student_name || '?')[0].toUpperCase()}
+        </div>
+        <div className="flex-1">
+          <p className="font-semibold text-sm text-[var(--color-text)]">{student.student_name}</p>
+          <p className="text-xs text-gray-400">{student.student_group_name} • {student.section_name}</p>
+        </div>
+        {summary && (
+          <div className="text-right">
+            <p className="text-xs text-gray-400">Balance</p>
+            <p className={`text-sm font-bold ${balance > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+              {INR(balance)}
+            </p>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-700 group">
-            <span className="w-5 h-5 rounded-full bg-black/5 flex items-center justify-center group-hover:bg-black/10 transition-all duration-300">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs font-medium text-gray-400 mb-1 block">Amount *</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.00"
+            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]"
+          />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-gray-400 mb-1 block">Payment Mode *</label>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]"
+          >
+            {(modes.length ? modes : [{ mode_of_payment: 'Cash' }]).map((m) => (
+              <option key={m.mode_of_payment} value={m.mode_of_payment}>{m.name || m.mode_of_payment}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-400 mb-1 block">Reference No. (optional)</label>
+        <input
+          type="text"
+          value={referenceNo}
+          onChange={(e) => setReferenceNo(e.target.value)}
+          placeholder="Cheque / transaction ID"
+          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)]"
+        />
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-400 mb-1 block">Notes (optional)</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          className="w-full px-3 py-2.5 rounded-xl border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 focus:border-[var(--color-primary)] resize-none"
+        />
+      </div>
+
+      {formError && (
+        <div className="px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          {formError}
+        </div>
+      )}
+
+      <button
+        type="submit"
+        disabled={recordPayment.isPending}
+        className="w-full py-2.5 rounded-xl bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50"
+      >
+        {recordPayment.isPending ? 'Recording...' : 'Record Payment'}
+      </button>
+    </form>
+  );
+}
+
+// ── Step 3: success + download PDF ──────────────────────────────────────────
+function SuccessView({ receipt, student, academicYearLabel, onNewPayment, onClose }) {
+  const handleDownload = () => {
+    downloadReceiptPdf({
+      receipt_number: receipt.receipt_number,
+      student_name: student.student_name,
+      class_section: `${student.student_group_name || ''}${student.section_name ? ' - ' + student.section_name : ''}`,
+      academic_year: academicYearLabel,
+      amount: receipt.amount,
+      mode: receipt.mode,
+      reference_no: receipt.reference_no,
+      notes: receipt.notes,
+      created_at: receipt.created_at,
+    });
+  };
+
+  return (
+    <div className="text-center py-4 space-y-4">
+      <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+        <svg className="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+        </svg>
+      </div>
+      <div>
+        <p className="font-semibold text-[var(--color-text)]">Payment Recorded</p>
+        <p className="text-sm text-gray-400 mt-1">
+          {INR(receipt.amount)} from {student.student_name}
+        </p>
+        <p className="text-xs text-gray-400 mt-1 font-mono">{receipt.receipt_number}</p>
+      </div>
+
+      <div className="flex items-center gap-2 pt-2">
+        <button
+          onClick={handleDownload}
+          className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-700 hover:bg-gray-50 transition flex items-center justify-center gap-2"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m-9 7h12a2 2 0 002-2V8a2 2 0 00-2-2h-4l-2-2H5a2 2 0 00-2 2v11a2 2 0 002 2z" />
+          </svg>
+          Download PDF
+        </button>
+        <button
+          onClick={onNewPayment}
+          className="flex-1 py-2.5 rounded-xl bg-[var(--color-primary)] text-white text-sm font-medium hover:opacity-90 transition"
+        >
+          Record Another
+        </button>
+      </div>
+      <button onClick={onClose} className="text-xs text-gray-400 hover:text-gray-600 transition">
+        Close
+      </button>
+    </div>
+  );
+}
+
+// ── Main modal ──────────────────────────────────────────────────────────────
+export default function RecordPaymentModal({ onClose }) {
+  const { selectedYear, selectedYearData } = useAcademicYear();
+  const [student, setStudent] = useState(null);
+  const [completedReceipt, setCompletedReceipt] = useState(null);
+
+  const handleRecorded = (receipt) => setCompletedReceipt(receipt);
+
+  const handleNewPayment = () => {
+    setCompletedReceipt(null);
+    setStudent(null);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 relative">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-[var(--color-text)]">Record Payment</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-gray-500 transition">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
-        <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-          {error && <div className="p-3 bg-red-50 text-red-700 text-sm rounded-xl border border-red-100">{error}</div>}
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-              Invoice <span className="text-red-500">*</span>
-            </label>
-            {unpaidInvoices.length === 0 ? (
-              <p className="text-sm text-gray-400 italic">No unpaid invoices</p>
-            ) : (
-              <select value={form.invoice_id}
-                onChange={e => handleInvoiceChange(e.target.value)}
-                className="input w-full text-sm">
-                <option value="">Select Invoice</option>
-                {unpaidInvoices.map(inv => {
-                  const outstanding = (inv.net_amount || 0) - (inv.paid_amount || 0);
-                  return (
-                    <option key={inv.id} value={inv.id}>
-                      Due: {INR(outstanding)} — {inv.status}
-                    </option>
-                  );
-                })}
-              </select>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">
-              Amount <span className="text-red-500">*</span>
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">Rs</span>
-              <input type="number" placeholder="0" value={form.amount}
-                onChange={e => setField('amount', e.target.value)}
-                className="input w-full text-sm pl-9" />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Payment Mode</label>
-            <div className="flex flex-wrap gap-2">
-              {PAYMENT_MODES.map(m => (
-                <button key={m} type="button"
-                  onClick={() => setField('mode', m)}
-                  className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-all ${
-                    form.mode === m
-                      ? 'bg-[var(--color-primary)] text-white border-[var(--color-primary)]'
-                      : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
-                  }`}>
-                  {m}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {form.mode !== 'CASH' && (
-            <div>
-              <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Reference Number</label>
-              <input type="text" placeholder="UPI ID, Cheque No, Transaction ID"
-                value={form.reference_no}
-                onChange={e => setField('reference_no', e.target.value)}
-                className="input w-full text-sm" />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Notes</label>
-            <textarea placeholder="Optional notes..." value={form.notes}
-              onChange={e => setField('notes', e.target.value)}
-              className="input w-full text-sm resize-none" rows={2} />
-          </div>
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between">
-          <button onClick={onClose}
-            className="px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition">
-            Cancel
-          </button>
-          <button onClick={handleSave} disabled={saving || !canSave}
-            className="btn-primary px-5 py-2.5 text-sm disabled:opacity-50 flex items-center gap-2">
-            {saving ? (
-              <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving...</>
-            ) : 'Record Payment'}
-          </button>
-        </div>
+        {completedReceipt ? (
+          <SuccessView
+            receipt={completedReceipt}
+            student={student}
+            academicYearLabel={selectedYearData?.name || ''}
+            onNewPayment={handleNewPayment}
+            onClose={onClose}
+          />
+        ) : !student ? (
+          <StudentPicker onSelect={setStudent} />
+        ) : (
+          <PaymentForm
+            student={student}
+            academicYear={selectedYear}
+            onBack={() => setStudent(null)}
+            onRecorded={handleRecorded}
+          />
+        )}
       </div>
     </div>
   );

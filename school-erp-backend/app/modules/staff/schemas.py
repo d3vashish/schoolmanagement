@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -45,5 +46,23 @@ class StaffLeaveResponse(BaseModel):
     end_date: str
     reason: str | None
     status: str
+
+    model_config = {"from_attributes": True}
+
+
+class StaffAttendanceMark(BaseModel):
+    staff_id: UUID
+    date: date
+    status: str
+    remarks: str | None = None
+
+
+class StaffAttendanceResponse(BaseModel):
+    id: UUID
+    staff_id: UUID
+    date: date
+    status: str
+    marked_by: UUID
+    remarks: str | None = None
 
     model_config = {"from_attributes": True}

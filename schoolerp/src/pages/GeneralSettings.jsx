@@ -1,5 +1,53 @@
 import { useEffect, useState } from 'react';
-import { adminGetSettings, adminUpdateSettings } from '../api/frappe';
+import { useQueryClient } from '@tanstack/react-query';
+import { adminGetSettings, adminUpdateSettings, client } from '../api/frappe';
+
+// Parses "2027-28" -> { name: "2027-28", start_date: "2027-04-01", end_date: "2028-03-31" }
+// Falls back to a plain +1 year window if the trailing part isn't a valid 2-digit year suffix.
+function parseAcademicYearName(raw) {
+  const match = /^(\d{4})\s*-\s*(\d{2,4})$/.exec(raw.trim());
+  if (!match) return null;
+  const startYear = parseInt(match[1], 10);
+  let endYear;
+  if (match[2].length === 4) {
+    endYear = parseInt(match[2], 10);
+  } else {
+    endYear = Math.floor(startYear / 100) * 100 + parseInt(match[2], 10);
+    if (endYear <= startYear) endYear += 100;
+  }
+  return {
+    name: raw.trim(),
+    start_date: `${startYear}-04-01`,
+    end_date: `${endYear}-03-31`,
+  };
+}
+
+// Ensures the academic year typed into Settings exists as a real AcademicYear record
+// and is marked active, creating it if necessary. Never throws — settings save should
+// still succeed even if this sync fails.
+async function syncAcademicYear(rawName) {
+  const name = (rawName || '').trim();
+  if (!name) return;
+
+  const parsed = parseAcademicYearName(name);
+  if (!parsed) return; // not in "YYYY-YY" / "YYYY-YYYY" shape, skip silently
+
+  try {
+    const { data: years = [] } = await client.get('/academic/years');
+    const existing = years.find(y => y.name === name);
+
+    if (existing) {
+      if (!existing.is_active) {
+        await client.patch(`/academic/years/${existing.id}/activate`);
+      }
+      return;
+    }
+
+    await client.post('/academic/years', { ...parsed, is_active: true });
+  } catch {
+    // Non-fatal: settings were still saved even if year sync failed.
+  }
+}
 
 const SECTION = ({ title, children, index = 0, className = '' }) => (
   <div
@@ -74,6 +122,7 @@ const DEFAULT_FORM = {
 };
 
 export default function GeneralSettings() {
+  const queryClient = useQueryClient();
   const [form, setForm] = useState(DEFAULT_FORM);
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -112,6 +161,8 @@ export default function GeneralSettings() {
     try {
       const settings = Object.entries(form).map(([key, value]) => ({ key, value }));
       await adminUpdateSettings(settings);
+      await syncAcademicYear(form.academic_year);
+      queryClient.invalidateQueries({ queryKey: ['academic-years'] });
       setDirty(false);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);

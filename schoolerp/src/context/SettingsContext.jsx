@@ -23,8 +23,8 @@ export function SettingsProvider({ children }) {
       const activeYear = Array.isArray(years) ? years.find(y => y.is_active) || years[0] : null;
       setSettings({
         academic_year: activeYear?.name || '',
-        company: 'School ERP',
-        school_name: 'School ERP',
+        company: 'Orange City Convent',
+        school_name: 'Orange City Convent',
         school_email: '',
         school_phone: '',
         school_address: '',

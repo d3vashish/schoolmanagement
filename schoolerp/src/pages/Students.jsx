@@ -47,10 +47,11 @@ export default function Students() {
   const [saving, setSaving]             = useState(false);
 
   const emptyForm = {
-    first_name: '', last_name: '', gender: '', date_of_birth: '', blood_group: '',
-    student_email: '', student_mobile: '', address_line1: '', city: '', state: '',
-    pincode: '', guardian_name: '', guardian_relation: '', guardian_mobile: '', guardian_email: '',
-  };
+  first_name: '', last_name: '', gender: '', date_of_birth: '', blood_group: '',
+  aadhar_number: '', student_email: '', student_mobile: '', address_line1: '', city: '', state: '',
+  pincode: '', guardian_name: '', guardian_relation: '', guardian_mobile: '', guardian_email: '',
+  student_type: 'new',
+};
   const [formData, setFormData] = useState(emptyForm);
 
   // Fetch all Programs (standards) natively
@@ -177,7 +178,7 @@ export default function Students() {
 
   // Fetch students
   const { data: studentsData, isLoading: loadingStudents, error: studentError } = useQuery({
-    queryKey: ['Student', 'students', selectedSection?.id || selectedSection?.name, studentPage, search],
+    queryKey: ['Student', 'students', selectedSection?.id || selectedSection?.name, studentPage, search, selectedYear],
     queryFn: async () => {
       const sectionIdToUse = selectedSection?.id || selectedSection?.name;
       if (!sectionIdToUse) {
@@ -191,6 +192,7 @@ export default function Students() {
         per_page: String(STUDENTS_PER_PAGE),
       });
       if (search) params.set('search', search);
+      if (selectedYear) params.set('academic_year_id', selectedYear);
 
       console.log('[Students] queryFn firing with params:', params.toString(), 'section:', sectionIdToUse);
       const res = await client.get(`/academic/students?${params}`);
@@ -235,27 +237,45 @@ export default function Students() {
   });
 
   const createStudentMutation = useMutation({
-    mutationFn: async (data) => {
-      const newStudent = await createDoc('Student', data);
-      const groupDoc = await getDoc('Student Group', selectedSection.name);
-      const existingStudents = groupDoc?.students || [];
-      await updateDoc('Student Group', selectedSection.name, {
-        students: [...existingStudents, {
-          student: newStudent.name,
-          student_name: `${data.first_name} ${data.last_name || ''}`.trim(),
-          active: 1,
-        }]
-      });
-      return newStudent;
-    },
+  mutationFn: async (data) => {
+    const res = await client.post('/academic/students', {
+      first_name: data.first_name,
+      last_name: data.last_name || '',
+      email: data.student_email || data.student_email_id || '',
+      password: 'password123',
+      aadhar_number: data.aadhar_number,
+      date_of_birth: data.date_of_birth || null,
+      guardian_name: data.guardian_name || null,
+      guardian_phone: data.guardian_mobile || null,
+      address: data.address_line1 || null,
+      class_id: selectedSection?.class_id || null,
+      section_id: selectedSection?.id || null,
+      academic_year_id: selectedYear || null,
+      is_new_student: data.student_type === 'new',
+    });
+    
+    return res.data;
+  },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setShowModal(false);
     },
+    onError: (error) => {                                    // ← add this
+      const detail = error.response?.data?.detail;
+      alert(detail || 'Failed to create student');
+    },
   });
 
   const updateStudentMutation = useMutation({
-    mutationFn: ({ name, data }) => updateDoc('Student', name, data),
+  mutationFn: ({ name, data }) => client.patch(`/academic/students/${name}`, {
+    first_name: data.first_name,
+    last_name: data.last_name,
+    aadhar_number: data.aadhar_number || null,
+    date_of_birth: data.date_of_birth || null,
+    guardian_name: data.guardian_name || null,
+    guardian_phone: data.guardian_mobile || null,
+    address: data.address_line1 || null,
+  }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setShowModal(false); setEditingStudent(null);
@@ -263,7 +283,7 @@ export default function Students() {
   });
 
   const deleteStudentMutation = useMutation({
-    mutationFn: (name) => deleteDoc('Student', name),
+    mutationFn: (name) => client.delete(`/academic/students/${name}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['Student', 'students'] });
       setDeleteConfirm(null);
@@ -275,32 +295,38 @@ export default function Students() {
   const openAddModal = () => { setEditingStudent(null); setFormData(emptyForm); setShowModal(true); };
 
   const openEditModal = async (student) => {
-    try {
-      const s = await getDoc('Student', student.name);
-      setEditingStudent(s);
-      setFormData({
-        first_name: s.first_name || '', last_name: s.last_name || '',
-        gender: s.gender || '', date_of_birth: s.date_of_birth || '',
-        blood_group: s.blood_group || '', student_email: s.student_email_id || '',
-        student_mobile: s.student_mobile_number || '', address_line1: s.address_line_1 || '',
-        city: s.city || '', state: s.state || '', pincode: s.pincode || '',
-        guardian_name: s.guardians?.[0]?.guardian_name || '',
-        guardian_relation: s.guardians?.[0]?.relation || '',
-        guardian_mobile: s.guardians?.[0]?.mobile_number || '',
-        guardian_email: s.guardians?.[0]?.email_address || '',
-      });
+  try {
+    const s = await getDoc('Student', student.name);
+    setEditingStudent(s);
+    setFormData({
+      first_name: s.first_name || '', last_name: s.last_name || '',
+      gender: s.gender || '', date_of_birth: s.date_of_birth || '',
+      blood_group: s.blood_group || '', aadhar_number: s.aadhar_number || '',
+      student_email: s.student_email_id || '',
+      student_mobile: s.student_mobile_number || '', address_line1: s.address_line_1 || '',
+      city: s.city || '', state: s.state || '', pincode: s.pincode || '',
+      guardian_name: s.guardians?.[0]?.guardian_name || '',
+      guardian_relation: s.guardians?.[0]?.relation || '',
+      guardian_mobile: s.guardians?.[0]?.mobile_number || '',
+      guardian_email: s.guardians?.[0]?.email_address || '',
+    });
       setShowModal(true);
     } catch (err) { console.error('Failed to fetch student details:', err); }
   };
 
   const handleSave = (e) => {
-    e.preventDefault();
-    if (!formData.first_name) { alert('First name is required'); return; }
-    if (!formData.student_email) { alert('Student Email is required'); return; }
+  e.preventDefault();
+  if (!formData.first_name) { alert('First name is required'); return; }
+  if (!formData.student_email) { alert('Student Email is required'); return; }
+  if (!editingStudent && (!formData.aadhar_number || !/^\d{12}$/.test(formData.aadhar_number))) {
+    alert('A valid 12-digit Aadhar number is required'); return;
+  }
 
     const studentData = {
       first_name: formData.first_name,
       student_email_id: formData.student_email,
+      aadhar_number: formData.aadhar_number || undefined,
+      student_type: formData.student_type,
       ...(formData.last_name && { last_name: formData.last_name }),
       ...(formData.gender && { gender: formData.gender }),
       ...(formData.date_of_birth && { date_of_birth: formData.date_of_birth }),
@@ -592,7 +618,7 @@ export default function Students() {
                 ) : (
                   students.map((student) => (
                     <tr key={student.name} onClick={() => navigate(`/students/${student.name}`)} className="hover:bg-gray-50 transition-colors cursor-pointer">
-                      <td className="table-cell font-medium text-[var(--color-primary)]">{student.name}</td>
+                      <td className="table-cell font-medium text-[var(--color-primary)]">{student.admission_number || student.name}</td>
                       <td className="table-cell font-medium">{student.first_name} {student.last_name}</td>
                       <td className="table-cell">{student.gender || '-'}</td>
                       <td className="table-cell">{student.date_of_birth || '-'}</td>
@@ -810,12 +836,26 @@ export default function Students() {
                   <input type="date" name="date_of_birth" value={formData.date_of_birth} onChange={handleInputChange} className="input" />
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
+                    Aadhar Number {!editingStudent && <span className="text-red-500">*</span>}
+                  </label>
+                  <input type="text" name="aadhar_number" value={formData.aadhar_number} onChange={handleInputChange}
+                    maxLength={12} placeholder="12-digit Aadhar number" className="input" required={!editingStudent} />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Blood Group</label>
                   <select name="blood_group" value={formData.blood_group} onChange={handleInputChange} className="input">
                     <option value="">Select</option>
                     {['A+','A-','B+','B-','O+','O-','AB+','AB-'].map(bg => (
                       <option key={bg} value={bg}>{bg}</option>
                     ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[var(--color-text)] mb-2">Student Type</label>
+                  <select name="student_type" value={formData.student_type} onChange={handleInputChange} className="input">
+                    <option value="new">New Student</option>
+                    <option value="old">Old Student</option>
                   </select>
                 </div>
                 <div>

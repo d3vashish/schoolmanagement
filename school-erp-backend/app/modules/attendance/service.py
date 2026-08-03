@@ -12,6 +12,7 @@ from app.modules.attendance.models import (
     LeaveType,
 )
 from app.modules.auth.models import ParentProfile, StudentProfile
+from app.modules.notifications.service import create_notification
 
 
 async def mark_attendance(
@@ -76,6 +77,14 @@ async def _notify_parents(student_id: str, attendance_date: date, db: AsyncSessi
     for parent in parents:
         if parent.phone:
             pass
+        await create_notification(
+            title="Absence recorded",
+            message=f"Your child was marked absent on {attendance_date.isoformat()}.",
+            type="ATTENDANCE",
+            link=f"/students/{student_id}",
+            user_id=str(parent.user_id),
+            db=db,
+        )
 
 
 async def update_attendance_status(attendance_id: str, status: str, db: AsyncSession) -> Attendance:
@@ -144,4 +153,17 @@ async def approve_leave(
     leave.approved_by = approved_by
     leave.approved_at = datetime.now(timezone.utc)
     await db.flush()
+
+    # Notify the student whose leave was actioned
+    student = await db.get(StudentProfile, leave.student_id)
+    if student:
+        await create_notification(
+            title=f"Leave {status.lower()}",
+            message=f"Your leave request ({leave.start_date.isoformat()} to {leave.end_date.isoformat()}) was {status.lower()}.",
+            type="LEAVE",
+            link="/attendance",
+            user_id=str(student.user_id),
+            db=db,
+        )
+
     return leave

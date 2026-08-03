@@ -18,6 +18,7 @@ from app.core.security import (
 from app.modules.academic.models import Enrollment
 from app.modules.auth.models import ROLES, StudentProfile, StaffProfile, ParentProfile, User
 from app.modules.auth.schemas import (
+    ChangePasswordRequest,
     LoginRequest,
     LoginResponse,
     OTPRequest,
@@ -57,7 +58,7 @@ async def login(request: Request, body: LoginRequest, db: AsyncSession = Depends
 
 
 @router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("5/minute")
+@limiter.limit("30/minute")
 async def refresh(request: Request, body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     user_id = await consume_refresh_token(body.refresh_token)
     if not user_id:
@@ -131,6 +132,22 @@ async def get_me(current_user: dict = Depends(get_current_user), db: AsyncSessio
                 "id": str(sec.id),
             }
     return result
+
+
+@router.post("/change-password")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await get_user_by_id(db, current_user["id"])
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not user.hashed_pw or not verify_password(body.current_password, user.hashed_pw):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    user.hashed_pw = hash_password(body.new_password)
+    await db.flush()
+    return {"message": "Password changed successfully"}
 
 
 def _build_user_response(user: User) -> dict:

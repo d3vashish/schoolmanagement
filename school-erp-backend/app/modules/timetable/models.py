@@ -10,7 +10,7 @@ class TimetableSlot(Base, TimestampMixin):
 
     section_id = Column(UUID(as_uuid=True), ForeignKey("academic_sections.id"), nullable=False)
     subject_id = Column(UUID(as_uuid=True), ForeignKey("academic_subjects.id"), nullable=False)
-    instructor_id = Column(UUID(as_uuid=True), ForeignKey("staff_profiles.id"), nullable=False)
+    instructor_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     day_of_week = Column(Integer, nullable=False)
     period_no = Column(Integer, nullable=False)
     academic_year_id = Column(UUID(as_uuid=True), ForeignKey("academic_years.id"), nullable=False)
