@@ -18,7 +18,9 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
               cd ~/schoolmanagement
+              git stash
               git pull origin main
+              git stash pop || true
             
               cd schoolerp
               npm install
